@@ -77,11 +77,18 @@ static void simulate_workload(void *region, size_t size) {
 static int demo_manual_init(void) {
     printf("\n=== Tiered Memory Manager Demo ===\n\n");
     
-    printf("[DEMO] Initializing manager...\n");
-    if (tiered_manager_init() < 0) {
-        fprintf(stderr, "[DEMO] Init failed\n");
-        fprintf(stderr, "[DEMO] Check: /proc/sys/vm/unprivileged_userfaultfd = 1\n");
-        return -1;
+    /* Check if shim already initialized the manager (LD_PRELOAD case) */
+    int shim_mode = g_manager.initialized;
+    
+    if (shim_mode) {
+        printf("[DEMO] Manager already initialized by shim\n");
+    } else {
+        printf("[DEMO] Initializing manager...\n");
+        if (tiered_manager_init() < 0) {
+            fprintf(stderr, "[DEMO] Init failed\n");
+            fprintf(stderr, "[DEMO] Check: /proc/sys/vm/unprivileged_userfaultfd = 1\n");
+            return -1;
+        }
     }
     
     /* 16MB test region (smaller than 1GB threshold for manual testing) */
@@ -92,7 +99,7 @@ static int demo_manual_init(void) {
                         MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     if (region == MAP_FAILED) {
         perror("mmap");
-        tiered_manager_shutdown();
+        if (!shim_mode) tiered_manager_shutdown();
         return -1;
     }
     
@@ -100,7 +107,7 @@ static int demo_manual_init(void) {
     if (register_managed_region(region, test_size) < 0) {
         fprintf(stderr, "[DEMO] Registration failed\n");
         munmap(region, test_size);
-        tiered_manager_shutdown();
+        if (!shim_mode) tiered_manager_shutdown();
         return -1;
     }
     
@@ -117,7 +124,11 @@ static int demo_manual_init(void) {
     printf("[DEMO] Cleanup...\n");
     unregister_managed_region(region);
     munmap(region, test_size);
-    tiered_manager_shutdown();
+    
+    /* Only shutdown if we initialized (shim handles its own shutdown) */
+    if (!shim_mode) {
+        tiered_manager_shutdown();
+    }
     
     return 0;
 }

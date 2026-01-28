@@ -25,7 +25,7 @@ else
 endif
 
 # Source files
-CORE_SRCS = tiered_memory.c page_stats.c uffd_handler.c policy_thread.c
+CORE_SRCS = tiered_memory.c page_stats.c uffd_handler.c policy_thread.c pebs.c
 SHIM_SRCS = mmap_shim.c
 DEMO_SRCS = main.c
 
@@ -56,7 +56,7 @@ $(DEMO_BIN): $(CORE_OBJS) $(DEMO_OBJS)
 	@echo "Built $@ - run with: ./$@"
 
 # Object file compilation
-%.o: %.c tiered_memory.h
+%.o: %.c tiered_memory.h pebs.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Debug build

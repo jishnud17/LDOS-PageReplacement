@@ -1,0 +1,17 @@
+# Build artifacts
+obj/
+bin/
+lib/
+*.o
+*.so
+
+# ML data output
+ml_dataset.csv
+
+# Editor / OS junk
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/

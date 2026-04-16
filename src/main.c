@@ -19,8 +19,9 @@
 #include <sys/mman.h>
 #include <time.h>
 #include "tiered_memory.h"
+#include "workloads.h"
 
-static volatile int running = 1;
+volatile int running = 1;
 
 static void signal_handler(int sig) {
     (void)sig;
@@ -28,53 +29,10 @@ static void signal_handler(int sig) {
 }
 
 /*============================================================================
- * WORKLOAD SIMULATION
- *===========================================================================*/
-
-static void simulate_workload(void *region, size_t size) {
-    size_t num_pages = size / PAGE_SIZE;
-    char *data = (char*)region;
-    
-    printf("\n[DEMO] Simulating workload with %zu pages\n", num_pages);
-    
-    /* Phase 1: Sequential initialization */
-    printf("[DEMO] Phase 1: Sequential init...\n");
-    for (size_t i = 0; i < num_pages && running; i++) {
-        data[i * PAGE_SIZE] = 'A';
-        if (i % 100 == 0 && i > 0) printf("  %zu pages\n", i);
-    }
-    if (!running) return;
-    
-    /* Phase 2: Create hot pages (first 10%) */
-    printf("[DEMO] Phase 2: Creating hot pages...\n");
-    size_t hot_pages = num_pages / 10;
-    for (int round = 0; round < 50 && running; round++) {
-        for (size_t i = 0; i < hot_pages && running; i++) {
-            if (round % 3 == 0) data[i * PAGE_SIZE]++;
-            else { volatile char c = data[i * PAGE_SIZE]; (void)c; }
-        }
-        usleep(10000);
-    }
-    if (!running) return;
-    
-    /* Phase 3: Random access (biased toward hot pages) */
-    printf("[DEMO] Phase 3: Random access...\n");
-    srand(time(NULL));
-    for (int i = 0; i < 1000 && running; i++) {
-        size_t idx = (rand() % 100 < 70) ? rand() % hot_pages 
-                                          : hot_pages + rand() % (num_pages - hot_pages);
-        data[idx * PAGE_SIZE] = (char)i;
-        usleep(1000);
-    }
-    
-    printf("[DEMO] Workload complete\n");
-}
-
-/*============================================================================
  * DEMO
  *===========================================================================*/
 
-static int demo_manual_init(void) {
+static int demo_manual_init(const char *testcase_name) {
     printf("\n=== Tiered Memory Manager Demo ===\n\n");
     
     /* Check if shim already initialized the manager (LD_PRELOAD case) */
@@ -114,10 +72,19 @@ static int demo_manual_init(void) {
     sleep(1);
     tiered_manager_print_status();
     
-    simulate_workload(region, test_size);
+    if (strcmp(testcase_name, "hot_cold") == 0) {
+        testcase_hot_cold_split(region, test_size);
+    } else if (strcmp(testcase_name, "sequential") == 0) {
+        testcase_sequential_scan(region, test_size);
+    } else if (strcmp(testcase_name, "temporal") == 0) {
+        testcase_temporal_shift(region, test_size);
+    } else {
+        printf("[DEMO] Unknown testcase '%s', falling back to hot_cold\n", testcase_name);
+        testcase_hot_cold_split(region, test_size);
+    }
     
-    printf("[DEMO] Running policy thread for 2s...\n");
-    sleep(2);
+    printf("[DEMO] Running policy thread for 5s (soak)...\n");
+    sleep(5);
     
     tiered_manager_print_status();
     
@@ -153,22 +120,33 @@ int main(int argc, char *argv[]) {
     printf("UT Austin - NSF Research\n");
     printf("==========================\n");
     
-    if (argc > 1 && strcmp(argv[1], "--help") == 0) {
-        printf("Usage: %s [--help | --shim]\n\n", argv[0]);
-        printf("Run demo: ./tiered_manager\n");
-        printf("Use shim: LD_PRELOAD=./libmmap_shim.so ./your_app\n");
-        return 0;
+    const char *testcase_name = "hot_cold"; /* Default testcase */
+    unsigned int seed = 42;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--help") == 0) {
+            printf("Usage: %s [--help | --shim | --test=<name>]\n\n", argv[0]);
+            printf("Run demo: ./tiered_manager [--test=hot_cold|sequential|temporal]\n");
+            printf("Use shim: LD_PRELOAD=./libmmap_shim.so ./your_app\n");
+            return 0;
+        } else if (strcmp(argv[i], "--shim") == 0) {
+            printf("Shim intercepts mmap > 1GB.\n");
+            printf("Usage: LD_PRELOAD=./libmmap_shim.so ./your_app\n");
+            return 0;
+        } else if (strncmp(argv[i], "--test=", 7) == 0) {
+            testcase_name = argv[i] + 7;
+        } else if (strncmp(argv[i], "--seed=", 7) == 0) {
+            seed = (unsigned int)atoi(argv[i] + 7);
+        }
     }
     
-    if (argc > 1 && strcmp(argv[1], "--shim") == 0) {
-        printf("Shim intercepts mmap > 1GB.\n");
-        printf("Usage: LD_PRELOAD=./libmmap_shim.so ./your_app\n");
-        return 0;
-    }
-    
+    srand(seed);
+    printf("[DEMO] Seed: %u, Testcase: %s\n", seed, testcase_name);
+
     print_ml_integration_info();
+    set_csv_label(testcase_name);
     
-    int result = demo_manual_init();
+    int result = demo_manual_init(testcase_name);
     if (result == 0) {
         printf("\n[DEMO] Success!\n");
     }

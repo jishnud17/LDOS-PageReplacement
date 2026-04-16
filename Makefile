@@ -9,11 +9,11 @@
 #
 # Usage:
 #   1. Build: make
-#   2. Run demo: ./tiered_manager
-#   3. Use shim: LD_PRELOAD=./libmmap_shim.so ./your_program
+#   2. Run demo: ./bin/tiered_manager
+#   3. Use shim: LD_PRELOAD=./lib/libmmap_shim.so ./your_program
 
 CC = gcc
-CFLAGS = -Wall -Wextra -Werror -std=gnu11 -fPIC
+CFLAGS = -Wall -Wextra -Werror -std=gnu11 -fPIC -Isrc
 LDFLAGS = -pthread -ldl -lm
 
 # Debug vs Release
@@ -24,39 +24,59 @@ else
     CFLAGS += -O2 -DNDEBUG
 endif
 
+# Directories
+SRC_DIR = src
+OBJ_DIR = obj
+BIN_DIR = bin
+LIB_DIR = lib
+
 # Source files
-CORE_SRCS = tiered_memory.c page_stats.c uffd_handler.c policy_thread.c pebs.c
-SHIM_SRCS = mmap_shim.c
-DEMO_SRCS = main.c
+ALL_SRCS = $(wildcard $(SRC_DIR)/*.c)
+
+# Core sources (everything except main.c and mmap_shim.c)
+CORE_SRCS = $(filter-out $(SRC_DIR)/main.c $(SRC_DIR)/mmap_shim.c, $(ALL_SRCS))
+
+# Shim-specific source
+SHIM_SRC = $(SRC_DIR)/mmap_shim.c
+
+# Demo-specific source
+DEMO_SRC = $(SRC_DIR)/main.c
 
 # Object files
-CORE_OBJS = $(CORE_SRCS:.c=.o)
-SHIM_OBJS = $(SHIM_SRCS:.c=.o)
-DEMO_OBJS = $(DEMO_SRCS:.c=.o)
+CORE_OBJS = $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(CORE_SRCS))
+SHIM_OBJ  = $(OBJ_DIR)/mmap_shim.o
+DEMO_OBJ  = $(OBJ_DIR)/main.o
+
+# Headers (for dependency tracking)
+HEADERS = $(wildcard $(SRC_DIR)/*.h)
 
 # Output files
-SHIM_LIB = libmmap_shim.so
-DEMO_BIN = tiered_manager
+SHIM_LIB = $(LIB_DIR)/libmmap_shim.so
+DEMO_BIN = $(BIN_DIR)/tiered_manager
 
 # Default target
-all: $(SHIM_LIB) $(DEMO_BIN)
+all: dirs $(SHIM_LIB) $(DEMO_BIN)
+
+# Ensure directories exist
+dirs:
+	@mkdir -p $(OBJ_DIR) $(BIN_DIR) $(LIB_DIR)
 
 # Shim library (for LD_PRELOAD)
-lib: $(SHIM_LIB)
+lib: dirs $(SHIM_LIB)
 
-$(SHIM_LIB): $(CORE_OBJS) $(SHIM_OBJS)
+$(SHIM_LIB): $(CORE_OBJS) $(SHIM_OBJ)
 	$(CC) -shared -o $@ $^ $(LDFLAGS)
 	@echo "Built $@ - use with: LD_PRELOAD=./$@ ./your_program"
 
 # Demo program
-demo: $(DEMO_BIN)
+demo: dirs $(DEMO_BIN)
 
-$(DEMO_BIN): $(CORE_OBJS) $(DEMO_OBJS)
+$(DEMO_BIN): $(CORE_OBJS) $(DEMO_OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS)
 	@echo "Built $@ - run with: ./$@"
 
-# Object file compilation
-%.o: %.c tiered_memory.h pebs.h
+# Object file compilation (all sources use the same rule)
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(HEADERS)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Debug build
@@ -65,8 +85,7 @@ debug:
 
 # Clean
 clean:
-	rm -f $(CORE_OBJS) $(SHIM_OBJS) $(DEMO_OBJS)
-	rm -f $(SHIM_LIB) $(DEMO_BIN)
+	rm -rf $(OBJ_DIR) $(BIN_DIR) $(LIB_DIR)
 	@echo "Cleaned build artifacts"
 
 # Install (to /usr/local by default)
@@ -75,12 +94,12 @@ install: $(SHIM_LIB)
 	install -d $(PREFIX)/lib
 	install -m 644 $(SHIM_LIB) $(PREFIX)/lib/
 	install -d $(PREFIX)/include
-	install -m 644 tiered_memory.h $(PREFIX)/include/
+	install -m 644 $(SRC_DIR)/tiered_memory.h $(PREFIX)/include/
 	@echo "Installed to $(PREFIX)"
 
 # Uninstall
 uninstall:
-	rm -f $(PREFIX)/lib/$(SHIM_LIB)
+	rm -f $(PREFIX)/lib/libmmap_shim.so
 	rm -f $(PREFIX)/include/tiered_memory.h
 	@echo "Uninstalled from $(PREFIX)"
 
@@ -104,7 +123,7 @@ help:
 	@echo "Examples:"
 	@echo "  make                 # Build everything"
 	@echo "  make DEBUG=1         # Debug build"
-	@echo "  ./tiered_manager     # Run demo"
-	@echo "  LD_PRELOAD=./libmmap_shim.so ./app  # Use shim"
+	@echo "  ./bin/tiered_manager # Run demo"
+	@echo "  LD_PRELOAD=./lib/libmmap_shim.so ./app  # Use shim"
 
-.PHONY: all lib demo debug clean install uninstall help
+.PHONY: all dirs lib demo debug clean install uninstall help

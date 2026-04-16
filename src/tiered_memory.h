@@ -189,6 +189,7 @@ void cleanup_page_stats(void);
 
 /* Policy */
 void set_migration_policy(migration_policy_fn policy);
+void set_csv_label(const char *label);
 bool default_heuristic_policy(const page_stats_t *stats, migration_decision_t *decision);
 
 /* Utilities */

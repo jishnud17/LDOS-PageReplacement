@@ -23,8 +23,34 @@
 #include <unistd.h>
 
 migration_policy_fn g_migration_policy = NULL;
+static FILE *g_csv_file = NULL;
+static const char *g_csv_label = "default";
+
+void set_csv_label(const char *label) {
+    if (label) g_csv_label = label;
+}
 
 static void *policy_thread_loop(void *arg);
+
+static void export_page_stats_to_csv(uint64_t cycle) {
+    if (!g_csv_file) return;
+    
+    uint64_t now = get_time_ns();
+    pthread_rwlock_rdlock(&g_manager.stats_lock);
+    for (size_t i = 0; i < PAGE_STATS_HASH_SIZE; i++) {
+        page_stats_t *entry = g_manager.page_stats_table[i];
+        while (entry != NULL) {
+            if (entry->access_count > 0) {
+                fprintf(g_csv_file, "%" PRIu64 ",%" PRIu64 ",%p,%d,%f,%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu32 "\n",
+                        cycle, now, entry->page_addr, entry->current_tier, 
+                        entry->heat_score, entry->access_count, 
+                        entry->read_count, entry->write_count, entry->migration_count);
+            }
+            entry = entry->next;
+        }
+    }
+    pthread_rwlock_unlock(&g_manager.stats_lock);
+}
 
 /*============================================================================
  * POLICY CONFIGURATION
@@ -196,8 +222,14 @@ static void *policy_thread_loop(void *arg) {
     }
     pthread_rwlock_unlock(&g_manager.stats_lock);
 
-    /* Periodic logging (~1 second) */
     uint64_t cycles = atomic_load(&g_manager.policy_cycles);
+
+    /* Export dataset every 5 cycles (50ms) */
+    if (cycles % 5 == 0) {
+        export_page_stats_to_csv(cycles);
+    }
+
+    /* Periodic logging (~1 second) */
     if (cycles % 100 == 0) {
       TM_INFO("Cycle %" PRIu64 ": pages=%" PRIu64 " faults=%" PRIu64
               " migrations=%" PRIu64,
@@ -216,6 +248,14 @@ int start_policy_thread(void) {
     g_migration_policy = default_heuristic_policy;
   }
 
+  char csv_filename[256];
+  snprintf(csv_filename, sizeof(csv_filename), "ml_dataset_%s.csv", g_csv_label);
+  g_csv_file = fopen(csv_filename, "w");
+  if (g_csv_file) {
+      fprintf(g_csv_file, "cycle,timestamp_ns,page_addr,current_tier,heat_score,access_count,read_count,write_count,migration_count\n");
+      TM_INFO("CSV output: %s", csv_filename);
+  }
+
   if (pthread_create(&g_manager.policy_thread, NULL, policy_thread_loop,
                      NULL) != 0) {
     TM_ERROR("Failed to create policy thread: %s", strerror(errno));
@@ -227,5 +267,9 @@ int start_policy_thread(void) {
 
 void stop_policy_thread(void) {
   pthread_join(g_manager.policy_thread, NULL);
+  if (g_csv_file) {
+      fclose(g_csv_file);
+      g_csv_file = NULL;
+  }
   TM_INFO("Policy thread stopped");
 }

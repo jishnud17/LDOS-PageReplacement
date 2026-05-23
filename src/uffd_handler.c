@@ -270,8 +270,8 @@ static void *uffd_handler_thread(void *arg) {
               .range = {.start = (unsigned long)page, .len = PAGE_SIZE},
               .mode = 0};
           ioctl(g_manager.uffd, UFFDIO_WRITEPROTECT, &wp); /* clear — lets write proceed */
-          wp.mode = UFFDIO_WRITEPROTECT_MODE_WP;
-          ioctl(g_manager.uffd, UFFDIO_WRITEPROTECT, &wp); /* re-protect for next write */
+          /* Do NOT re-protect here; the policy thread re-arms all pages
+           * on a timer so we sample at a controlled rate, not on every write. */
         } else {
           /* First access (missing page): place and resolve. */
           memory_tier_t tier = decide_initial_placement(fault_addr);
@@ -288,6 +288,34 @@ static void *uffd_handler_thread(void *arg) {
 void stop_uffd_handler(void) {
   pthread_join(g_manager.uffd_thread, NULL);
   TM_INFO("UFFD handler thread stopped");
+}
+
+/*
+ * reprotect_all_tracked_pages - Re-arm write-protection on every tracked page.
+ *
+ * Called by the policy thread every WP_RESAMPLE_CYCLES to open a new
+ * sampling window.  Pages that were written since the last call will have
+ * had their WP cleared; re-protecting them here means the next write will
+ * fault again and increment access_count.  Pages already WP (never written
+ * since last arm) silently return ENOTSUP/EBUSY from the ioctl — that is
+ * harmless and expected.
+ */
+void reprotect_all_tracked_pages(void) {
+  if (!g_manager.uffd_wp_supported) return;
+
+  pthread_rwlock_rdlock(&g_manager.stats_lock);
+  for (size_t i = 0; i < PAGE_STATS_HASH_SIZE; i++) {
+    page_stats_t *entry = g_manager.page_stats_table[i];
+    while (entry != NULL) {
+      struct uffdio_writeprotect wp = {
+          .range = {.start = (unsigned long)entry->page_addr, .len = PAGE_SIZE},
+          .mode = UFFDIO_WRITEPROTECT_MODE_WP};
+      /* Ignore errors: page may already be WP or not yet mapped. */
+      ioctl(g_manager.uffd, UFFDIO_WRITEPROTECT, &wp);
+      entry = entry->next;
+    }
+  }
+  pthread_rwlock_unlock(&g_manager.stats_lock);
 }
 
 void cleanup_userfaultfd(void) {

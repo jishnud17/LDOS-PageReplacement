@@ -26,6 +26,15 @@ migration_policy_fn g_migration_policy = NULL;
 static FILE *g_csv_file = NULL;
 static const char *g_csv_label = "default";
 
+/*
+ * How often to re-arm UFFD write-protect on all tracked pages.
+ * Each arm opens one sampling window: the first write per page per window
+ * fires a WP fault and increments access_count.  Smaller values give finer
+ * time resolution; larger values reduce ioctl overhead.
+ * At POLICY_INTERVAL_MS=10 ms, 5 cycles = one re-arm every 50 ms.
+ */
+#define WP_RESAMPLE_CYCLES 5
+
 void set_csv_label(const char *label) {
     if (label) g_csv_label = label;
 }
@@ -197,6 +206,15 @@ static void *policy_thread_loop(void *arg) {
     pebs_merge_with_page_stats();
 
     update_all_page_features();
+
+    /* Re-arm write-protect every WP_RESAMPLE_CYCLES ticks so the next
+     * write to each page fires a WP fault and increments access_count.
+     * This is the only place WP is re-applied; the fault handler clears
+     * it but never re-sets it, preventing the infinite-fault loop. */
+    uint64_t cycles_now = atomic_load(&g_manager.policy_cycles);
+    if (cycles_now % WP_RESAMPLE_CYCLES == 0) {
+        reprotect_all_tracked_pages();
+    }
 
     uint32_t migrations = 0;
     pthread_rwlock_rdlock(&g_manager.stats_lock);

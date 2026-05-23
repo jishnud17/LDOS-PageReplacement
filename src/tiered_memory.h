@@ -196,6 +196,7 @@ bool default_heuristic_policy(const page_stats_t *stats, migration_decision_t *d
 /* Utilities */
 uint64_t get_time_ns(void);
 void* page_align(void *addr);
+void reprotect_all_tracked_pages(void);
 
 /*============================================================================
  * LOGGING

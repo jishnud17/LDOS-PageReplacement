@@ -111,6 +111,7 @@ typedef struct managed_region {
 typedef struct tiered_manager {
     bool initialized;
     int uffd;
+    bool uffd_wp_supported;
     
     /* Threads */
     pthread_t uffd_thread;

@@ -40,7 +40,7 @@ int init_userfaultfd(void) {
 
   struct uffdio_api uffdio_api = {
       .api = UFFD_API,
-      .features = 0 /* Request minimal features for compatibility */
+      .features = UFFD_FEATURE_PAGEFAULT_FLAG_WP
   };
 
   if (ioctl(g_manager.uffd, UFFDIO_API, &uffdio_api) < 0) {
@@ -50,6 +50,11 @@ int init_userfaultfd(void) {
     g_manager.uffd = -1;
     return -1;
   }
+
+  g_manager.uffd_wp_supported =
+      !!(uffdio_api.features & UFFD_FEATURE_PAGEFAULT_FLAG_WP);
+  TM_INFO("UFFD write-protect tracking: %s",
+          g_manager.uffd_wp_supported ? "enabled" : "unavailable");
 
   TM_DEBUG("UFFD API version: %llu, features: 0x%llx",
            (unsigned long long)uffdio_api.api,
@@ -97,7 +102,8 @@ int register_managed_region(void *addr, size_t length) {
 
   struct uffdio_register uffdio_register = {
       .range = {.start = (unsigned long)addr, .len = length},
-      .mode = UFFDIO_REGISTER_MODE_MISSING};
+      .mode = UFFDIO_REGISTER_MODE_MISSING |
+              (g_manager.uffd_wp_supported ? UFFDIO_REGISTER_MODE_WP : 0)};
 
   if (ioctl(g_manager.uffd, UFFDIO_REGISTER, &uffdio_register) < 0) {
     TM_ERROR("UFFDIO_REGISTER failed for %p+%zu: %s", addr, length,
@@ -180,6 +186,16 @@ static int resolve_page_fault(void *fault_addr, memory_tier_t tier) {
     record_page_access(page_addr, false);
   }
 
+  /* Write-protect the page so every subsequent write faults back here,
+   * letting us increment access_count for true access frequency tracking. */
+  if (g_manager.uffd_wp_supported) {
+    struct uffdio_writeprotect wp = {
+        .range = {.start = (unsigned long)page_addr, .len = PAGE_SIZE},
+        .mode = UFFDIO_WRITEPROTECT_MODE_WP};
+    if (ioctl(g_manager.uffd, UFFDIO_WRITEPROTECT, &wp) < 0)
+      TM_ERROR("UFFDIO_WRITEPROTECT failed for %p: %s", page_addr, strerror(errno));
+  }
+
   /* Update region stats */
   pthread_mutex_lock(&g_manager.regions_lock);
   for (int i = 0; i < MAX_MANAGED_REGIONS; i++) {
@@ -243,8 +259,24 @@ static void *uffd_handler_thread(void *arg) {
 
       if (msg.event == UFFD_EVENT_PAGEFAULT) {
         void *fault_addr = (void *)msg.arg.pagefault.address;
-        memory_tier_t tier = decide_initial_placement(fault_addr);
-        resolve_page_fault(fault_addr, tier);
+
+        if (g_manager.uffd_wp_supported &&
+            (msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP)) {
+          /* Repeat write to a tracked page: count it, then re-protect. */
+          record_page_access(fault_addr, true);
+
+          void *page = page_align(fault_addr);
+          struct uffdio_writeprotect wp = {
+              .range = {.start = (unsigned long)page, .len = PAGE_SIZE},
+              .mode = 0};
+          ioctl(g_manager.uffd, UFFDIO_WRITEPROTECT, &wp); /* clear — lets write proceed */
+          wp.mode = UFFDIO_WRITEPROTECT_MODE_WP;
+          ioctl(g_manager.uffd, UFFDIO_WRITEPROTECT, &wp); /* re-protect for next write */
+        } else {
+          /* First access (missing page): place and resolve. */
+          memory_tier_t tier = decide_initial_placement(fault_addr);
+          resolve_page_fault(fault_addr, tier);
+        }
       }
     }
   }

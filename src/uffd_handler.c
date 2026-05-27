@@ -276,6 +276,14 @@ static void *uffd_handler_thread(void *arg) {
           /* First access (missing page): place and resolve. */
           memory_tier_t tier = decide_initial_placement(fault_addr);
           resolve_page_fault(fault_addr, tier);
+          /* Patch up read/write split now that we know the fault cause. */
+          if (msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WRITE) {
+            page_stats_t *s = get_page_stats(page_align(fault_addr));
+            if (s) {
+              atomic_fetch_add(&s->write_count, 1);
+              atomic_fetch_sub(&s->read_count, 1);
+            }
+          }
         }
       }
     }

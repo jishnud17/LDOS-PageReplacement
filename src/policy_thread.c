@@ -50,10 +50,11 @@ static void export_page_stats_to_csv(uint64_t cycle) {
         page_stats_t *entry = g_manager.page_stats_table[i];
         while (entry != NULL) {
             if (entry->access_count > 0) {
-                fprintf(g_csv_file, "%" PRIu64 ",%" PRIu64 ",%p,%d,%f,%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu32 "\n",
-                        cycle, now, entry->page_addr, entry->current_tier, 
-                        entry->heat_score, entry->access_count, 
-                        entry->read_count, entry->write_count, entry->migration_count);
+                fprintf(g_csv_file, "%" PRIu64 ",%" PRIu64 ",%p,%d,%f,%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu32 ",%f\n",
+                        cycle, now, entry->page_addr, entry->current_tier,
+                        entry->heat_score, entry->access_count,
+                        entry->read_count, entry->write_count, entry->migration_count,
+                        entry->access_rate);
             }
             entry = entry->next;
         }
@@ -200,7 +201,7 @@ static void *policy_thread_loop(void *arg) {
     if (!g_manager.threads_running)
       break;
 
-    atomic_fetch_add(&g_manager.policy_cycles, 1);
+    uint64_t cycles = atomic_fetch_add(&g_manager.policy_cycles, 1) + 1;
 
     /* Merge PEBS hardware samples with page stats */
     pebs_merge_with_page_stats();
@@ -211,8 +212,7 @@ static void *policy_thread_loop(void *arg) {
      * write to each page fires a WP fault and increments access_count.
      * This is the only place WP is re-applied; the fault handler clears
      * it but never re-sets it, preventing the infinite-fault loop. */
-    uint64_t cycles_now = atomic_load(&g_manager.policy_cycles);
-    if (cycles_now % WP_RESAMPLE_CYCLES == 0) {
+    if (cycles % WP_RESAMPLE_CYCLES == 0) {
         reprotect_all_tracked_pages();
     }
 
@@ -239,8 +239,6 @@ static void *policy_thread_loop(void *arg) {
       }
     }
     pthread_rwlock_unlock(&g_manager.stats_lock);
-
-    uint64_t cycles = atomic_load(&g_manager.policy_cycles);
 
     /* Export dataset every 5 cycles (50ms) */
     if (cycles % 5 == 0) {
@@ -270,7 +268,7 @@ int start_policy_thread(void) {
   snprintf(csv_filename, sizeof(csv_filename), "ml_dataset_%s.csv", g_csv_label);
   g_csv_file = fopen(csv_filename, "w");
   if (g_csv_file) {
-      fprintf(g_csv_file, "cycle,timestamp_ns,page_addr,current_tier,heat_score,access_count,read_count,write_count,migration_count\n");
+      fprintf(g_csv_file, "cycle,timestamp_ns,page_addr,current_tier,heat_score,access_count,read_count,write_count,migration_count,access_rate\n");
       TM_INFO("CSV output: %s", csv_filename);
   }
 

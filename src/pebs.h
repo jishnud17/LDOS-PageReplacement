@@ -20,10 +20,12 @@
  * CONFIGURATION
  *===========================================================================*/
 
-#define PEBS_SAMPLE_PERIOD 2003          /* Sample every ~2K memory ops (prime).
-                                          * Low enough to capture samples on the
-                                          * synthetic workloads; raise if the ring
-                                          * buffer throttles on a real application. */
+#define PEBS_SAMPLE_PERIOD 5003          /* Sample every ~5K memory ops (prime).
+                                          * Chosen so the 1MB ring buffer does not
+                                          * throttle on the graded workloads (2003
+                                          * caused ~2.5K throttle events, which
+                                          * showed up as ~10x dips in hot-page rate);
+                                          * still yields >250K samples per run. */
 #define PEBS_BUFFER_PAGES (1 + (1 << 8)) /* 1MB ring buffer (must be 1+2^n) */
 
 /* Intel PEBS event codes.

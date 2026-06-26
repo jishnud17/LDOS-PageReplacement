@@ -50,11 +50,27 @@ static void export_page_stats_to_csv(uint64_t cycle) {
         page_stats_t *entry = g_manager.page_stats_table[i];
         while (entry != NULL) {
             if (entry->access_count > 0) {
-                fprintf(g_csv_file, "%" PRIu64 ",%" PRIu64 ",%p,%d,%f,%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu32 ",%f\n",
+                const page_signals_t *s = &entry->sig;
+                fprintf(g_csv_file,
+                        /* existing 10 columns */
+                        "%" PRIu64 ",%" PRIu64 ",%p,%d,%f,%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu32 ",%f"
+                        /* 32 predictive-signal columns (psar_dir & supertrend_dir are %d) */
+                        ",%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g"
+                        ",%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%d,%.6g"
+                        ",%.6g,%.6g,%.6g,%.6g,%d,%.6g,%.6g,%.6g,%.6g,%.6g"
+                        ",%.6g,%.6g\n",
                         cycle, now, entry->page_addr, entry->current_tier,
                         entry->heat_score, entry->access_count,
                         entry->read_count, entry->write_count, entry->migration_count,
-                        entry->access_rate);
+                        entry->access_rate,
+                        s->interval_access_rate, s->si, s->asi,
+                        s->aroon_up, s->aroon_down, s->aroon_osc,
+                        s->adx, s->plus_di, s->minus_di, s->gapo,
+                        s->ich_tenkan, s->ich_kijun, s->ich_senkou_a, s->ich_senkou_b, s->ich_chikou,
+                        s->linreg_slope, s->linreg_intercept, s->psar_out, s->psar_dir, s->rwi_high,
+                        s->rwi_low, s->ravi, s->stc, s->stc_signal, s->supertrend_dir,
+                        s->supertrend, s->sqn, s->trix, s->vhf, s->inter_access_interval_ms,
+                        s->inter_access_variance_ms2, s->recency_weighted_freq);
             }
             entry = entry->next;
         }
@@ -240,8 +256,10 @@ static void *policy_thread_loop(void *arg) {
     }
     pthread_rwlock_unlock(&g_manager.stats_lock);
 
-    /* Export dataset every 5 cycles (50ms) */
+    /* Update predictive signals then export, every 5 cycles (50ms).
+     * One signal "bar" per export keeps the window cadence aligned to rows. */
     if (cycles % 5 == 0) {
+        update_all_page_signals();
         export_page_stats_to_csv(cycles);
     }
 
@@ -268,7 +286,12 @@ int start_policy_thread(void) {
   snprintf(csv_filename, sizeof(csv_filename), "ml_dataset_%s.csv", g_csv_label);
   g_csv_file = fopen(csv_filename, "w");
   if (g_csv_file) {
-      fprintf(g_csv_file, "cycle,timestamp_ns,page_addr,current_tier,heat_score,access_count,read_count,write_count,migration_count,access_rate\n");
+      fprintf(g_csv_file,
+              "cycle,timestamp_ns,page_addr,current_tier,heat_score,access_count,read_count,write_count,migration_count,access_rate,"
+              "interval_access_rate,si,asi,aroon_up,aroon_down,aroon_osc,adx,plus_di,minus_di,gapo,"
+              "ich_tenkan,ich_kijun,ich_senkou_a,ich_senkou_b,ich_chikou,linreg_slope,linreg_intercept,psar,psar_dir,rwi_high,"
+              "rwi_low,ravi,stc,stc_signal,supertrend_dir,supertrend,sqn,trix,vhf,inter_access_interval_ms,"
+              "inter_access_variance_ms2,recency_weighted_freq\n");
       TM_INFO("CSV output: %s", csv_filename);
   }
 

@@ -20,12 +20,20 @@
  * CONFIGURATION
  *===========================================================================*/
 
-#define PEBS_SAMPLE_PERIOD 100007        /* Samples every ~100K memory ops */
+#define PEBS_SAMPLE_PERIOD 2003          /* Sample every ~2K memory ops (prime).
+                                          * Low enough to capture samples on the
+                                          * synthetic workloads; raise if the ring
+                                          * buffer throttles on a real application. */
 #define PEBS_BUFFER_PAGES (1 + (1 << 8)) /* 1MB ring buffer (must be 1+2^n) */
 
-/* Intel PEBS event codes */
-#define PEBS_EVENT_MEM_LOADS 0x80d1  /* MEM_LOAD_RETIRED.ALL_LOADS */
-#define PEBS_EVENT_MEM_STORES 0x82d0 /* MEM_INST_RETIRED.ALL_STORES */
+/* Intel PEBS event codes.
+ * 0x81d0 / 0x82d0 = ALL_LOADS / ALL_STORES.  On Haswell (c220g2 Xeon E5-2660 v3)
+ * these are MEM_UOPS_RETIRED.{ALL_LOADS,ALL_STORES}; on Skylake+ the same codes
+ * map to MEM_INST_RETIRED.{ALL_LOADS,ALL_STORES}, so this pair is portable.
+ * NOTE: the old load code 0x80d1 used umask 0x80, which is undefined for event
+ * D1 on Haswell -- it opened but never counted, hence zero load samples. */
+#define PEBS_EVENT_MEM_LOADS 0x81d0  /* MEM_UOPS_RETIRED.ALL_LOADS */
+#define PEBS_EVENT_MEM_STORES 0x82d0 /* MEM_UOPS_RETIRED.ALL_STORES */
 
 /*============================================================================
  * DATA STRUCTURES

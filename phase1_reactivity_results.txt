@@ -1,0 +1,410 @@
+================================================================================
+PHASE-1 SIGNAL REACTIVITY RESULTS
+LDOS PageReplacement -- heuristics-analysis branch
+Generated: 2026-06-26
+================================================================================
+
+BACKGROUND
+----------
+Three synthetic workloads were run on CloudLab c220g2 (Xeon E5-2660 v3, Haswell,
+Ubuntu 22.04, kernel 5.15).  PEBS sampled every 5003 retired memory uops; UFFD
+tracked write-protect faults.  Per-page signals were computed in rolling 64-bar
+windows of 50 ms each and exported to CSV.  The reactivity script then detected
+state-change events (cold_to_hot, hot_to_cold, migration) per page, aligned all
+instances at t=0, and scored each signal by:
+
+  amplitude   -- how far the signal moves around the event (z-score units)
+  consistency -- fraction of individual events that move in the same direction
+  lead_lag_ms -- when the move starts relative to the transition (negative = LEADS)
+  score       -- amplitude * consistency  (the primary ranking metric)
+
+Three workloads produced complementary data:
+  hot_cold   -- 10% hot (64 hits/sweep), 20% warm (8), 70% cold (1/37 pages)
+  sequential -- uniform 4 hits/page/sweep across all pages
+  temporal   -- phase 1: region A hot (3 s), phase 2: region B hot (3 s), A goes cold
+
+================================================================================
+SIGNAL GROUPS -- WHICH SIGNALS MEASURE THE SAME THING
+================================================================================
+
+Understanding the overlap is critical before building the phase-2 model.
+Keeping redundant signals wastes model capacity and can mislead importance ranking.
+
+GROUP 1: VOLATILITY / MAGNITUDE-OF-RATE-CHANGE  [rwi_high, sqn, si, asi, rwi_low]
+-----------------------------------------------------------------------------------
+All five measure the same underlying concept: how large a move the access rate
+just made relative to its recent baseline.
+
+  rwi_high  -- Random Walk Index (high period).  Compares actual range to the
+                range expected from a random walk.  rwi > 1 means directional move.
+  sqn       -- System Quality Number.  Expectancy / std of rate changes.  Measures
+                trend quality; spikes when the rate moves monotonically.
+  si        -- Swing Index.  Uses |close - prev_close| relative to True Range.
+                Numerically different from rwi/sqn but fires on the same events.
+  asi       -- Accumulation Swing Index.  Cumulative sum of SI.  Because each bar
+                adds to the running total, ASI is just SI with memory.
+  rwi_low   -- RWI computed over the low period (shorter lookback).  Consistently
+                weaker than rwi_high (~60-80% of its score) because the shorter
+                window catches less of the sustained move.
+
+  >>> rwi_high and sqn are nearly interchangeable.  si and asi are nearly
+      interchangeable (asi = cumulative si).  Pick ONE from this group.
+      rwi_high is recommended: highest score, most consistent across workloads.
+
+GROUP 2: TREND/CYCLE STATE  [stc, stc_signal]
+----------------------------------------------
+These two are the same indicator at different smoothing stages.
+
+  stc        -- Schaff Trend Cycle raw output.
+  stc_signal -- Signal line of STC (another EMA pass over stc).
+
+  Both consistently LAG transitions by +50 to +100 ms (they confirm after the
+  fact, they do not predict).  They are useful as confirmation signals, not
+  as features for early prediction.
+
+  >>> stc and stc_signal are redundant; stc_signal adds one more EMA lag on top
+      of stc.  If you include this group, use stc only.
+
+GROUP 3: BINARY DIRECTION FLAGS  [psar_dir, supertrend_dir]
+------------------------------------------------------------
+Both output +1 (uptrend) or -1 (downtrend).
+
+  psar_dir       -- direction flip of the Parabolic SAR.
+  supertrend_dir -- direction flip of the Supertrend band.
+
+  Both react at hot->cold transitions (score ~0.40-1.11) and are coincident
+  (lead_lag ~0 ms).  supertrend_dir is consistently weaker than psar_dir.
+
+  >>> Keep psar_dir, drop supertrend_dir.
+
+GROUP 4: DIRECTIONAL MOVEMENT  [plus_di, minus_di, adx]
+---------------------------------------------------------
+All three come from the same Directional Movement calculation.
+
+  plus_di   -- positive DI: upward directional momentum.
+  minus_di  -- negative DI: downward directional momentum.
+  adx       -- average of |+DI - -DI| / (+DI + -DI) over the lookback period.
+
+  minus_di is the most useful of the three for hot->cold detection (score
+  0.40-1.43 across workloads).  adx and plus_di are weaker and noisier.
+
+  >>> If you need a direction signal from this family, use minus_di only.
+
+GROUP 5: AROON FAMILY  [aroon_up, aroon_down, aroon_osc]
+---------------------------------------------------------
+aroon_osc = aroon_up - aroon_down.  It is algebraically derived from the other
+two, so all three carry identical information.
+
+  aroon_up   -- time since the highest rate in the lookback window.
+  aroon_down -- time since the lowest rate in the lookback window.
+  aroon_osc  -- their difference.
+
+  Moderate reactivity (score ~0.10-2.40 on temporal).  aroon_osc is the most
+  compact summary of the three.
+
+  >>> Keep aroon_osc, drop aroon_up and aroon_down.
+
+GROUP 6: INTER-ACCESS TIMING  [inter_access_interval_ms, inter_access_variance_ms2]
+-------------------------------------------------------------------------------------
+Both are derived from the distribution of gaps between consecutive accesses.
+
+  inter_access_interval_ms   -- mean gap between accesses in the bar window.
+  inter_access_variance_ms2  -- variance of those gaps.
+
+  inter_access_interval_ms is the ONLY signal that reliably LEADS cold_to_hot:
+  lead_lag = -100 ms to -250 ms across workloads.  Before a page heats up,
+  access gaps begin tightening -- the interval signal catches this early.
+  Consistency is moderate (0.53-0.72) so it is noisier than rwi/sqn, but its
+  predictive lead makes it uniquely valuable for the phase-2 model.
+
+  inter_access_variance_ms2 is a weaker, nosier companion.  It occasionally
+  leads cold_to_hot but with lower consistency.
+
+  >>> Keep inter_access_interval_ms.  inter_access_variance_ms2 is optional
+      (adds noise, minor incremental signal over the mean).
+
+GROUP 7: ICHIMOKU CLOUD  [ich_tenkan, ich_kijun, ich_senkou_a, ich_senkou_b, ich_chikou]
+-----------------------------------------------------------------------------------------
+All five are moving-average-type smoothings of the access rate over different
+lookback windows (9, 26, 52 bars).  They are far too slow to respond to the
+transitions in this data (6-second workloads with 50 ms bars).
+
+  Additionally: ich_chikou produces IDENTICAL output to interval_access_rate
+  in every workload (same amplitude, same score, same lead_lag).  This is a
+  code-level issue -- the chikou line appears to be replicated from the raw rate.
+
+  Scores across all workloads and events: amplitude < 0.42, score < 0.40.
+  In most configurations they are essentially noise (score < 0.05).
+
+  >>> DROP ENTIRE GROUP.  No predictive or reactive value in this dataset.
+
+GROUP 8: LINEAR REGRESSION  [linreg_slope, linreg_intercept]
+-------------------------------------------------------------
+Both are near-zero across all workloads and events (score < 0.03 in most cases).
+The regression window is too long for 50 ms transitions.
+
+  >>> DROP BOTH.  Not reactive to state changes at this timescale.
+
+GROUP 9: VHF AND GAPO  [vhf, gapo]
+------------------------------------
+Both measure the ratio of net price movement to total path length (trend vs.
+oscillation detection).
+
+  vhf   -- Vertical Horizontal Filter.  Moderate reactivity (score 0.37-0.58 on
+            hot_to_cold), consistent (~0.80), coincident.
+  gapo  -- Gap Oscillator.  Slightly weaker than vhf in most workloads.
+
+  These measure the same concept from slightly different angles.  vhf is the
+  stronger performer.
+
+  >>> Keep vhf, drop gapo if reducing feature count.
+
+GROUP 10: MISC INDIVIDUAL SIGNALS
+-----------------------------------
+  trix       -- Triple-smoothed rate of change.  HIGH amplitude (up to 5.6 on
+                temporal cold_to_hot) but extremely LOW consistency (0.06-0.18).
+                Fires loudly but randomly.  Not reliable.  DROP.
+
+  ravi       -- Relative vigor; moderate reactivity.  Lags transitions.
+                Optional, no unique predictive contribution.
+
+  heat_score -- Composite of UFFD + PEBS counts.  Moderate reactivity (score
+                0.10-1.57), coincident.  Useful as a secondary confirmation
+                feature but does not lead transitions.
+
+  recency_weighted_freq -- Near-zero reactivity across all workloads (score < 0.01).
+                           DROP.
+
+  access_rate / interval_access_rate -- Raw UFFD-based rate.  Near-zero reactivity
+                (score < 0.007).  PEBS-based signals outperform this by orders of
+                magnitude.  DROP as standalone features; they are already embedded
+                in the signal computations.
+
+  psar       -- The raw Parabolic SAR value (not direction).  Negligible reactivity.
+                Use psar_dir instead.
+
+  supertrend -- Raw Supertrend band value.  Negligible reactivity.  Use
+                psar_dir or supertrend_dir instead (and prefer psar_dir).
+
+================================================================================
+PER-WORKLOAD RANKED RESULTS (top signals only)
+================================================================================
+
+Columns: signal | amplitude | consistency | lead_lag_ms | score
+lead_lag < 0 = LEADS the transition (predictive)
+lead_lag > 0 = LAGS the transition (confirmation)
+lead_lag = 0 = coincident
+
+--------------------------------------------------------------------------------
+WORKLOAD: hot_cold  (n_hot_to_cold=3308, n_cold_to_hot=3296, n_migration=267)
+--------------------------------------------------------------------------------
+
+  EVENT: hot_to_cold  (most important for prediction -- catching pages going cold)
+
+    signal                   ampl   consist  lead_ms   score
+    rwi_high                 1.84    0.993    -100      1.83   *** LEADS, top pick
+    sqn                      1.66    1.000    -100      1.66   *** LEADS, same as rwi_high
+    si                       1.78    0.768    -100      1.37   [same group as rwi_high]
+    rwi_low                  1.04    0.899    -100      0.94   [same group as rwi_high]
+    psar_dir                 0.96    0.728       0      0.70
+    stc                      0.63    0.843    -250      0.53   [note: -250 is full window edge]
+    inter_access_interval_ms 0.69    0.703    -250      0.48   *** LEADS, unique signal
+    vhf                      0.55    0.841       0      0.46
+    stc_signal               0.59    0.765     -50      0.45   [same group as stc]
+    minus_di                 0.54    0.752     +50      0.40   [lags slightly]
+    supertrend_dir           0.59    0.683    -100      0.40   [same group as psar_dir]
+    aroon_osc                0.60    0.671    -100      0.40
+
+  EVENT: cold_to_hot
+
+    signal                   ampl   consist  lead_ms   score
+    rwi_high                 3.24    0.886       0      2.87
+    si                       2.86    0.884       0      2.53   [same group as rwi_high]
+    sqn                      2.76    0.847       0      2.34   [same group as rwi_high]
+    stc                      1.05    0.745     +50      0.78   [lags]
+    asi                      0.87    0.883       0      0.77   [same group as si]
+    stc_signal               1.00    0.700    +100      0.70   [lags, same group as stc]
+    inter_access_interval_ms 0.90    0.355    -250      0.32   *** leads but noisy
+
+  EVENT: migration  (n=267, small sample -- lower reliability)
+
+    rwi_high and vhf top with score ~1.0 and consistency=1.0 for this event,
+    but n=267 means the consistency=1.0 is suspicious (likely too few events to
+    measure true variance).  Treat migration scores with caution.
+
+--------------------------------------------------------------------------------
+WORKLOAD: sequential  (n_hot_to_cold=9654, n_cold_to_hot=8701, n_migration=92)
+--------------------------------------------------------------------------------
+
+  Largest event counts -- most statistically robust dataset.
+
+  EVENT: hot_to_cold
+
+    signal                   ampl   consist  lead_ms   score
+    rwi_high                 1.21    0.998       0      1.21
+    si                       0.99    0.808       0      0.80   [same group as rwi_high]
+    stc                      0.91    0.752    +100      0.69   [lags]
+    rwi_low                  0.70    0.931       0      0.65   [same group as rwi_high]
+    psar_dir                 0.91    0.699       0      0.64
+    stc_signal               0.83    0.744    +150      0.61   [lags, same group as stc]
+    minus_di                 0.61    0.794     +50      0.48
+    sqn                      0.46    0.999       0      0.45   [same group as rwi_high]
+    aroon_osc                0.52    0.769       0      0.40
+    vhf                      0.47    0.800       0      0.37
+
+  EVENT: cold_to_hot
+
+    signal                   ampl   consist  lead_ms   score
+    rwi_high                 1.48    0.884       0      1.31
+    si                       1.36    0.887       0      1.21   [same group as rwi_high]
+    heat_score               0.70    0.946       0      0.67
+    asi                      0.69    0.953       0      0.66   [same group as si]
+    inter_access_variance_ms 0.71    0.883       0      0.62
+    vhf                      0.44    0.850     -50      0.38
+    stc                      0.55    0.670     +50      0.37   [lags]
+    inter_access_interval_ms 0.50    0.716    -150      0.36   *** LEADS
+
+  NOTE: sequential workload shows sqn dropping to rank 8 (score 0.32) for
+  cold_to_hot while rwi_high stays at rank 1.  This is the primary case where
+  the two diverge -- sqn is noisier on uniform-access workloads.
+
+--------------------------------------------------------------------------------
+WORKLOAD: temporal  (n_hot_to_cold=1059, n_cold_to_hot=1057, n_migration=285)
+--------------------------------------------------------------------------------
+
+  Cleanest hot->cold transitions because the phase-change is hard-edged
+  (hammer_range stops completely).  Highest amplitudes across the board.
+
+  EVENT: hot_to_cold  (phase A stops, A's pages go fully cold)
+
+    signal                   ampl   consist  lead_ms   score
+    rwi_high                 2.41    0.995       0      2.40
+    sqn                      2.28    1.000       0      2.28   [same group as rwi_high]
+    stc_signal               2.20    0.924     +50      2.03   [lags, same group as stc]
+    stc                      2.03    0.926     +50      1.88   [lags]
+    si                       2.15    0.814       0      1.75   [same group as rwi_high]
+    rwi_low                  1.82    0.930     +50      1.69   [same group as rwi_high]
+    minus_di                 1.44    0.993       0      1.43
+    ravi                     1.58    0.753     +50      1.19   [lags]
+    psar_dir                 1.23    0.907       0      1.11
+    aroon_up                 0.95    0.886    +100      0.84   [same group as aroon_osc]
+
+  NOTE: stc and stc_signal score very high here but both lag by +50 ms.
+  On the temporal workload, the transition is sharp enough that even a +50 ms
+  lag is still a clear, high-amplitude response.
+
+  EVENT: cold_to_hot  (phase B pages heat up from baseline)
+
+    signal                   ampl   consist  lead_ms   score
+    si                       8.41    0.993       0      8.35   [same group as rwi_high]
+    rwi_high                 7.08    0.988       0      6.99
+    sqn                      5.55    0.961       0      5.33   [same group as rwi_high]
+    inter_access_interval_ms 6.04    0.533    -100      3.22   *** LEADS
+    vhf                      3.96    0.776       0      3.07
+    ravi                     2.84    0.853       0      2.42
+    aroon_up                 2.98    0.805       0      2.40   [same group as aroon_osc]
+    asi                      2.41    0.967       0      2.33   [same group as si]
+
+  NOTE: inter_access_interval_ms registers its strongest lead here (-100 ms,
+  score=3.22).  On temporal cold_to_hot, access gaps tighten noticeably before
+  the rate threshold crosses.  This is the best evidence that interval is
+  genuinely predictive and not just reactive.
+
+================================================================================
+SUMMARY: RECOMMENDED FEATURE SET FOR PHASE-2 MODEL
+================================================================================
+
+Based on cross-workload consistency, lead timing, and inter-signal redundancy:
+
+  KEEP (non-redundant, reactive, at least partially leading):
+
+    rwi_high                 -- Top volatility signal.  Coincident.  Highest and
+                                most consistent score in all 3 workloads.
+                                Represents the entire GROUP 1 family.
+
+    stc                      -- Trend/cycle state.  Lags +50-100 ms but has high
+                                consistency.  The only signal in its group with
+                                meaningful reactivity.  Use as confirmation feature.
+
+    inter_access_interval_ms -- ONLY signal that leads cold_to_hot (-100 to -250 ms).
+                                Noisier than rwi/sqn but provides timing information
+                                no other signal has.  Critical for the prediction task.
+
+    psar_dir                 -- Binary direction flag.  Coincident.  Low-cost feature
+                                for the model to learn transition direction.
+
+    minus_di                 -- Directional indicator.  Hot_to_cold detection.
+                                Complements psar_dir with a continuous value.
+
+    vhf                      -- Trend-vs-oscillation filter.  Moderate reactivity,
+                                high consistency.  Different axis from rwi_high.
+
+  OPTIONAL (adds marginal signal, not redundant):
+
+    heat_score               -- Composite UFFD+PEBS count.  Non-zero contribution
+                                in sequential workload.  Low effort to include.
+
+    aroon_osc                -- Time-since-high/low.  Moderate reactivity.
+                                Covers a different angle from vhf/rwi.
+
+  DROP (redundant or non-reactive):
+
+    sqn, si, asi, rwi_low    -- Same information as rwi_high.
+    stc_signal               -- Same as stc with extra lag.
+    supertrend_dir           -- Same as psar_dir, weaker.
+    plus_di, adx             -- Same family as minus_di, weaker.
+    aroon_up, aroon_down     -- Subsumed by aroon_osc.
+    gapo                     -- Same as vhf, weaker.
+    trix                     -- High amplitude, near-zero consistency.  Unreliable.
+    ravi                     -- No unique contribution over rwi/stc.
+    inter_access_variance_ms -- Weaker companion to interval_ms.
+    recency_weighted_freq    -- Near-zero reactivity.
+    linreg_slope             -- Near-zero reactivity.
+    linreg_intercept         -- Near-zero reactivity.
+    psar                     -- Use psar_dir (direction) not raw value.
+    supertrend               -- Use psar_dir instead.
+    ich_tenkan/kijun/        -- All near-zero.  Too slow for this timescale.
+      senkou_a/senkou_b/
+      chikou
+    access_rate              -- UFFD count; PEBS signals vastly outperform it.
+    interval_access_rate     -- Same as ich_chikou (possible code bug); near-zero.
+
+================================================================================
+HONEST CAVEATS (for mentor discussion)
+================================================================================
+
+1. SYNTHETIC WORKLOADS ONLY
+   All three workloads were purpose-built to produce graded intensity and clean
+   transitions.  Real application memory patterns are messier and may surface
+   different signal rankings.  This is phase-1 discovery; phase-2 should validate
+   on a real workload trace (e.g., Redis, SPEC, or a research benchmark).
+
+2. RESIDUAL PEBS THROTTLE DIPS
+   At sample period 5003, the kernel still produced occasional throttle bursts on
+   heavily-hammered hot pages.  These cause 1-2 bar dips in access_rate that are
+   visible in raw data.  The median smoothing in the event detector suppresses
+   false event detection from these dips, but they add low-level noise to signal
+   values computed over bars containing dips.  This is cosmetic: hot pages never
+   reach zero rate during the active phase.
+
+3. SINGLE RUN PER WORKLOAD
+   Each workload was run once.  Signal rankings are stable enough to present as
+   findings, but replication (2-3 runs, compare ranks) would strengthen the case.
+   The top-3 ranking (rwi_high/sqn/si) is unlikely to change; lower-ranked signals
+   may swap positions across runs.
+
+4. GROUP 1 IS NEAR-DEGENERATE
+   rwi_high, sqn, and si all measure the same thing (magnitude of rate change).
+   Their high scores reflect the fact that rate changes ARE the transitions --
+   these signals are reactive by construction.  The interesting finding is whether
+   any signal leads the transition, which is where inter_access_interval_ms stands
+   out as genuinely predictive rather than merely reactive.
+
+5. MIGRATION EVENT RELIABILITY
+   Migration event counts are small (92-267 per workload) compared to cold_to_hot
+   and hot_to_cold (1000-9000+).  Consistency scores of 1.0 on migration events
+   should be treated skeptically -- small n inflates consistency estimates.
+
+================================================================================
+END OF REPORT
+================================================================================

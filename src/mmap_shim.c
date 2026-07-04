@@ -34,12 +34,18 @@ static pthread_once_t init_once = PTHREAD_ONCE_INIT;
 static void shim_init_impl(void) {
     real_mmap = dlsym(RTLD_NEXT, "mmap");
     real_munmap = dlsym(RTLD_NEXT, "munmap");
-    
+
     if (!real_mmap || !real_munmap) {
         fprintf(stderr, "[SHIM ERROR] Failed to find real mmap/munmap: %s\n", dlerror());
         abort();
     }
-    
+
+    /* Name the CSV per-workload so back-to-back shim runs don't overwrite each
+     * other's data.  Must be set before tiered_manager_init(), which opens the
+     * CSV via start_policy_thread().  Falls back to "default" if unset. */
+    const char *csv_label = getenv("LDOS_CSV_LABEL");
+    if (csv_label) set_csv_label(csv_label);
+
     if (tiered_manager_init() < 0) {
         fprintf(stderr, "[SHIM WARNING] Tiered manager init failed, passing through\n");
     }

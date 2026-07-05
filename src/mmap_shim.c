@@ -27,6 +27,14 @@ static int (*real_munmap)(void*, size_t) = NULL;
 static int shim_initialized = 0;
 static pthread_once_t init_once = PTHREAD_ONCE_INIT;
 
+/* The synthetic workloads and the policy/uffd threads reference the global
+ * `running` flag (declared extern in workloads.h, defined in main.c for the
+ * demo binary).  main.o is NOT part of libmmap_shim.so, so under LD_PRELOAD
+ * the symbol is undefined and the loader aborts on first use.  Define it here
+ * so the shared library is self-contained; the shim keeps it set to 1 for the
+ * lifetime of the preloaded process. */
+volatile int running = 1;
+
 /*============================================================================
  * INITIALIZATION
  *===========================================================================*/

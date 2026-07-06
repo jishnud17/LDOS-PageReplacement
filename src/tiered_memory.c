@@ -146,6 +146,15 @@ void tiered_manager_shutdown(void) {
   g_manager.threads_running = false;
   stop_policy_thread();
   stop_uffd_handler();
+
+  /* Capture PEBS totals before shutdown so shim runs (which never call
+   * tiered_manager_print_status) still report whether sampling worked. */
+  pebs_stats_t pstats = pebs_get_stats();
+  TM_INFO("PEBS totals: samples=%" PRIu64 " reads=%" PRIu64
+          " writes=%" PRIu64 " throttles=%" PRIu64 " errors=%" PRIu64,
+          pstats.total_samples, pstats.read_samples, pstats.write_samples,
+          pstats.throttle_events, pstats.errors);
+
   pebs_shutdown();
 
   /* Final statistics */

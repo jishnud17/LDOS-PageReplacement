@@ -144,7 +144,11 @@ int main(int argc, char *argv[]) {
     printf("[DEMO] Seed: %u, Testcase: %s\n", seed, testcase_name);
 
     print_ml_integration_info();
-    set_csv_label(testcase_name);
+    /* LDOS_CSV_LABEL overrides the testcase-derived CSV name, matching the
+     * shim path's behavior (the control run was mislabeled because the env
+     * var was silently ignored here). */
+    const char *csv_label = getenv("LDOS_CSV_LABEL");
+    set_csv_label(csv_label ? csv_label : testcase_name);
     
     int result = demo_manual_init(testcase_name);
     if (result == 0) {

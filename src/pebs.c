@@ -167,6 +167,12 @@ static int setup_perf_event(__u64 config, __u64 config1, int precise,
   attr.sample_type =
       PERF_SAMPLE_IP | PERF_SAMPLE_TID | PERF_SAMPLE_WEIGHT | PERF_SAMPLE_ADDR;
   attr.disabled = 1; /* Start disabled */
+  attr.inherit = 1;  /* Sample threads created after open (pthread/OpenMP
+                      * workers), not just the opening thread.  Inherited
+                      * events redirect their output into this event's ring
+                      * buffer, same mechanism perf record uses.  Without
+                      * this, GUPS-style workloads (main thread only spawns
+                      * and joins) produce almost no samples. */
   attr.exclude_kernel = 1;
   attr.exclude_hv = 1;
   attr.exclude_callchain_kernel = 1;

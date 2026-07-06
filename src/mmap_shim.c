@@ -278,8 +278,15 @@ static int should_manage_mmap(size_t length, int flags, int fd) {
     (void)fd;
     if (length < LARGE_ALLOC_THRESHOLD) return 0;
     if (!(flags & MAP_ANONYMOUS)) return 0;
-    if (!(flags & MAP_PRIVATE)) return 0;
-    return 1;
+    if (flags & MAP_PRIVATE) return 1;
+    /* Shared anonymous mappings (e.g. GUPS's MAP_SHARED table) are safe to
+     * manage in telemetry-only mode, which never registers with uffd --
+     * uffd write-protect on shmem requires kernel >= 5.19. */
+    if (flags & MAP_SHARED) {
+        const char *t = getenv("LDOS_PEBS_TELEMETRY_ONLY");
+        return t != NULL && t[0] == '1';
+    }
+    return 0;
 }
 
 void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {

@@ -153,7 +153,8 @@ static pebs_page_record_t *get_or_create_record(uint64_t vaddr) {
   return rec;
 }
 
-static int setup_perf_event(__u64 config, __u64 config1, int *fd_out,
+static int setup_perf_event(__u64 config, __u64 config1, int precise,
+                            int *fd_out,
                             struct perf_event_mmap_page **page_out) {
   struct perf_event_attr attr;
   memset(&attr, 0, sizeof(attr));
@@ -170,9 +171,14 @@ static int setup_perf_event(__u64 config, __u64 config1, int *fd_out,
   attr.exclude_hv = 1;
   attr.exclude_callchain_kernel = 1;
   attr.exclude_callchain_user = 1;
-  attr.precise_ip = 1; /* Request PEBS */
+  attr.precise_ip = precise; /* Load latency facility needs 2; stores use 1 */
 
   int fd = perf_event_open(&attr, 0, -1, -1, 0);
+  while (fd == -1 && attr.precise_ip > 1) {
+    /* Some kernels/CPUs reject precise_ip=2; degrade and retry. */
+    attr.precise_ip--;
+    fd = perf_event_open(&attr, 0, -1, -1, 0);
+  }
   if (fd == -1) {
     TM_ERROR("perf_event_open failed: %s (config=0x%llx)", strerror(errno),
              (unsigned long long)config);
@@ -336,8 +342,8 @@ int pebs_init(void) {
     return -1;
   }
 
-  /* Setup read sampling (memory loads) */
-  if (setup_perf_event(PEBS_EVENT_MEM_LOADS, 0,
+  /* Setup read sampling: load latency facility (guaranteed DataLA capture) */
+  if (setup_perf_event(PEBS_EVENT_MEM_LOADS, PEBS_LOAD_LATENCY_THRESHOLD, 2,
                        &pebs_state.perf_fd[PEBS_SAMPLE_READ],
                        &pebs_state.perf_page[PEBS_SAMPLE_READ]) < 0) {
     TM_ERROR("Failed to setup PEBS for reads - PEBS may be unavailable");
@@ -347,7 +353,7 @@ int pebs_init(void) {
   }
 
   /* Setup write sampling (memory stores) */
-  if (setup_perf_event(PEBS_EVENT_MEM_STORES, 0,
+  if (setup_perf_event(PEBS_EVENT_MEM_STORES, 0, 1,
                        &pebs_state.perf_fd[PEBS_SAMPLE_WRITE],
                        &pebs_state.perf_page[PEBS_SAMPLE_WRITE]) < 0) {
     TM_ERROR("Failed to setup PEBS for writes");

@@ -29,12 +29,22 @@
 #define PEBS_BUFFER_PAGES (1 + (1 << 8)) /* 1MB ring buffer (must be 1+2^n) */
 
 /* Intel PEBS event codes.
- * 0x81d0 / 0x82d0 = ALL_LOADS / ALL_STORES.  On Haswell (c220g2 Xeon E5-2660 v3)
- * these are MEM_UOPS_RETIRED.{ALL_LOADS,ALL_STORES}; on Skylake+ the same codes
- * map to MEM_INST_RETIRED.{ALL_LOADS,ALL_STORES}, so this pair is portable.
- * NOTE: the old load code 0x80d1 used umask 0x80, which is undefined for event
- * D1 on Haswell -- it opened but never counted, hence zero load samples. */
-#define PEBS_EVENT_MEM_LOADS 0x81d0  /* MEM_UOPS_RETIRED.ALL_LOADS */
+ *
+ * LOADS: 0x01cd = MEM_TRANS_RETIRED.LOAD_LATENCY_GT_THRESHOLD, the "load
+ * latency facility" -- the event perf mem uses.  It guarantees data linear
+ * address (DataLA) capture in the PEBS record; requires precise_ip=2 and a
+ * latency threshold in config1 (PEBS_LOAD_LATENCY_THRESHOLD=3 cycles captures
+ * essentially all loads).
+ * NOTE: the previous load event 0x81d0 (MEM_UOPS_RETIRED.ALL_LOADS) counted
+ * correctly but reported a bogus constant data address (0xfeb80000) for every
+ * load sample on the c220g2 Haswell nodes -- store addresses were fine, so
+ * write-heavy workloads masked it.  Read-only regions (gapbs pr) got zero
+ * attributed samples, which is how it surfaced.
+ *
+ * STORES: 0x82d0 = MEM_UOPS_RETIRED.ALL_STORES (Haswell) /
+ * MEM_INST_RETIRED.ALL_STORES (Skylake+); address capture verified good. */
+#define PEBS_EVENT_MEM_LOADS 0x01cd  /* MEM_TRANS_RETIRED.LOAD_LATENCY_GT_THRESHOLD */
+#define PEBS_LOAD_LATENCY_THRESHOLD 3 /* config1: min load latency (cycles) */
 #define PEBS_EVENT_MEM_STORES 0x82d0 /* MEM_UOPS_RETIRED.ALL_STORES */
 
 /*============================================================================

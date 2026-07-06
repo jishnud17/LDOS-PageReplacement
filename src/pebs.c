@@ -119,6 +119,11 @@ static inline int page_is_sampled(uint64_t aligned_addr) {
   return ((aligned_addr >> 12) % g_page_sample_divisor) == 0;
 }
 
+/* Minimum lifetime samples before a page earns a stats entry
+ * (LDOS_MIN_SAMPLES_TO_TRACK, default 1 = admit on first sample).
+ * See the admission check in pebs_merge_with_page_stats(). */
+static uint64_t g_min_samples_to_track = 1;
+
 static pebs_page_record_t *get_or_create_record(uint64_t vaddr) {
   uint64_t aligned = page_align_addr(vaddr);
   size_t bucket = hash_addr(aligned);
@@ -367,6 +372,18 @@ int pebs_init(void) {
     }
   }
 
+  /* Optional admission threshold to keep sparse cold pages out of the
+   * stats table (holds the 50ms signal cadence on huge workloads). */
+  const char *min_env = getenv("LDOS_MIN_SAMPLES_TO_TRACK");
+  if (min_env != NULL) {
+    long v = atol(min_env);
+    if (v > 1) {
+      g_min_samples_to_track = (uint64_t)v;
+      TM_INFO("Track admission threshold: %ld samples before a page "
+              "enters the stats table", v);
+    }
+  }
+
   /* Initialize lock */
   if (pthread_rwlock_init(&pebs_state.records_lock, NULL) != 0) {
     TM_ERROR("Failed to init records lock");
@@ -604,6 +621,23 @@ void pebs_merge_with_page_stats(void) {
           rec = rec->next;
           continue;
         }
+      }
+
+      /* Admission threshold (LDOS_MIN_SAMPLES_TO_TRACK): a page must
+       * accumulate N lifetime samples before it earns a stats entry.
+       * Purpose: hold the 50ms signal cadence on huge sparse workloads.
+       * GUPS's 10% uniform traffic gives every page in a 2GB table an
+       * occasional stray sample (~1 per page per 7min); admitting them all
+       * grew the table to 159K pages and stretched the signal loop ~30x,
+       * which invalidated fast-vs-slow rankings.  Hot pages clear a
+       * threshold of 2-3 within a bar or two; one-sample cold pages never
+       * enter.  Pages that already have an entry keep updating regardless,
+       * so no history is lost.  Default 1 = previous behavior. */
+      if (g_min_samples_to_track > 1 &&
+          rec->read_samples + rec->write_samples < g_min_samples_to_track &&
+          get_page_stats((void *)rec->vaddr) == NULL) {
+        rec = rec->next;
+        continue;
       }
 
       /* Get or create corresponding page_stats entry */

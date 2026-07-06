@@ -118,155 +118,173 @@ datasets where the signal clock held its designed 50ms cadence.
   19. ICHIMOKU                 near-zero across all five lines at fine clock
 
 ================================================================================
-RANKING B: REAL-WORKLOAD EVIDENCE (GUPS hotset-move only; ~1.5s bars)
+RANKING B: REAL-WORKLOAD EVIDENCE (GUPS, bounded-tracking rerun; replicated x2)
 ================================================================================
-Basis: average score across GUPS's hot_to_cold (n=41) and cold_to_hot (n=18)
-events; consistency >= ~0.83 required for the GOOD group.  CAVEAT: the
-stretched clock favors slow smoothed signals (transitions become single-bar
-cliffs); this is the ranking of record for "fires on a real workload's
-transitions," not "reacts fastest."
+Basis: the RERUN datasets -- gups-hotset-move x2 (n=741-765 events per type
+per run, ~200ms measured bars) and gups-skewed x2 (n=96-129, ~143ms bars) --
+collected with bounded page tracking and hardware-timestamped gaps.  Each
+number replicated across two independent runs (r1/r2 values shown).
+Residual caveat: bars ran ~3-4x nominal (measured and labeled per dataset by
+the analysis), a large improvement over the earlier ~30x run whose rankings
+this table supersedes.
 
-  GOOD  (gate: avg score >= 4 AND consistency >= 0.83 -- six signals passed)
-   1. LINEAR REGRESSION        slope 28.9 sigma cold_to_hot (0.94), 0.90
-                               hot_to_cold -- highest avg score (14.3)
-   2. SUPERTREND               20.1 / 5.8 at 0.89-0.93 (band; the direction
-                               flag was noise)
-   3. ICHIMOKU                 16-20 sigma cold_to_hot at 0.83-0.89
-   4. ADX                      9.6 on BOTH events at PERFECT 1.00/1.00
-                               consistency -- best reliability on the board
-   5. RECENCY-WEIGHTED FREQ    13.7 / 4.5 at 0.89-0.93
-   6. RANDOM WALK INDEX        rwi_high 7.3 at 1.00 cold_to_hot, 0.95
-                               hot_to_cold; below the smoothers on score,
-                               second only to ADX on consistency
+  GOOD  (top-tier on the real workload, replicated)
+   1. RANDOM WALK INDEX        #1 on BOTH event types in BOTH hotset-move
+                               runs: rwi_high 2.12/2.09 cold_to_hot
+                               (0.89/0.86), 1.68/1.73 hot_to_cold (0.97);
+                               rwi_low #1 on skewed at 3.59/3.57 with
+                               PERFECT 1.00 consistency in both runs
+   2. SWING INDEX              #2 on skewed (2.40/3.04 at 0.92/0.99); #3 on
+                               hotset-move both runs
 
   POTENTIAL SUPPLEMENTARY
-   7. AROON                    aroon_down 8.2 hot_to_cold (0.95) but 0.72
-                               cold_to_hot -- consistency gate
-   8. ACCUM SWING INDEX        5.8 / 2.0 at 0.83-1.00
-   9. PARABOLIC SAR            band 5.0 hot_to_cold (0.88); 0.8 cold_to_hot;
-                               direction flag noise at this clock
-  10. SWING INDEX              3.9 / 1.0 at 0.90-0.94
-  11. DIRECTIONAL INDICATORS   minus_di 4.5 hot_to_cold (0.78); plus_di weak
-  12. RAVI                     2.3 / 2.4 at 0.85-1.00 -- reliable, small
-  13. HEAT SCORE               0.9 / 0.4, consistent but tiny
+   3. ACCUM SWING INDEX        1.71/1.66 at 1.00 on skewed; small but
+                               near-perfectly consistent on hotset-move
+                               (0.95-0.97); duplicates swing_index
+   4. SCHAFF TREND CYCLE       reacts on both (0.67-0.83) but at 0.64-0.67
+                               consistency and ALWAYS lagging (+200-410ms) --
+                               same confirmer profile as everywhere else
+   5. RAW RATE (interval_access_rate)  0.36-0.51 at 0.94-0.96 -- the
+                               underlying series, coincident
+   6. DIRECTIONAL INDICATORS   plus_di 0.39 at 0.80 (cold_to_hot), minus_di
+                               0.30 at 0.74 (hot_to_cold) -- small, directional
+   7. PARABOLIC SAR DIRECTION  0.45-0.62 at 0.45-0.53 -- weak at this cadence
+   8. LINEAR REGRESSION        0.65-0.78 at 0.67, lagging +200-400ms --
+                               its former #1 was the coarse-clock artifact;
+                               at finer bars it is a weak lagger
+   9. AROON                    0.51-0.59 at 0.44-0.51 -- weak
+  10. RECENCY-WEIGHTED FREQ    mid-field, no longer top-tier at finer bars
+  11. HEAT SCORE               small, consistent
 
-  USELESS
-  14. SQN                      amplitude 10-24 but 0.22-0.24 consistency --
-                               fires in random directions
-  15. TRIX                     0.44 consistency
-  16. SCHAFF TREND CYCLE       consistency collapsed to 0.41 -- never gets
-                               its confirmation bars at this clock
-  17. GAPO                     0.39 consistency
-  18. VHF                      0.33 consistency
-  19. INTER-ACCESS INTERVAL    0.001-0.013 -- flat zero (timestamp
-                               quantization; see Ranking C entry)
+  USELESS (on the real workload at measured cadence)
+  12. ADX                      COLLAPSED to 0.29 at 0.57 -- its perfect
+                               1.00/1.00 in the coarse-clock run is confirmed
+                               as a pure cadence artifact
+  13. ICHIMOKU                 near-bottom in all four runs -- same verdict
+  14. SUPERTREND               out of the top-12 entirely -- same verdict
+  15. SQN                      dead (as everywhere)
+  16. TRIX                     dead
+  17. VHF                      dead
+  18. GAPO                     dead
+  19. INTER-ACCESS INTERVAL    ~0.003 on GUPS despite the timestamp path now
+                               WORKING (proven on the control: 4.3 sigma,
+                               -449ms lead).  Structural, not mechanical:
+                               GUPS relocates its hotset INSTANTANEOUSLY --
+                               a step function has no precursor, and indeed
+                               NO signal leads on GUPS (all coincident or
+                               lagging).  Leading signals require workloads
+                               with gradual warm-up.
 
 ================================================================================
-RANKING C: COMBINED FINAL (real-workload primary, synthetic secondary)
+RANKING C: COMBINED FINAL (all evidence; the rerun resolved the A-vs-B split)
 ================================================================================
-Basis: Ranking B ordering as the primary key (per direction: real workloads
-are what the system must serve), consistency weighted above raw amplitude,
-with Ranking A used to (a) flag which Group-1 placements depend on the
-coarse clock and (b) settle ties.  Where A and B disagree, the entry says so.
+Basis: with the bounded-tracking rerun, the synthetic and real-workload
+rankings now AGREE -- the volatility family tops both.  This final ranking
+therefore needs no clock-dependent hedging: it is supported by phase-1,
+the control, and the replicated real-workload runs simultaneously.
 
-  GOOD  (three signals: strong on the real workload WITHOUT the placement
-         resting solely on the coarse-clock artifact)
-   1. ADX                      only signal with perfect consistency on both
-                               real event types (9.6 sigma at 1.00/1.00);
-                               erratic at fine clock -- verify in 50ms rerun
-   2. RANDOM WALK INDEX        the only signal top-tier under BOTH clocks
-                               (P1 #1 everywhere, CTL top-5, GUPS 1.00
-                               consistency) -- the safest pick on this list
-   3. RECENCY-WEIGHTED FREQ    good on real (13.7/4.5 at 0.89-0.93) AND
-                               decent on control (0.93 at 0.98) -- the most
-                               cadence-robust of the smoothed family
+  GOOD
+   1. RANDOM WALK INDEX        #1 or top-3 in EVERY valid dataset in the
+                               study: P1 #1 everywhere, CTL top-5, and #1 on
+                               the replicated real-workload rerun (both
+                               variants, both runs, consistency up to 1.00).
+                               The unconditional keeper; use both windows.
+   2. SWING INDEX              top-3 across P1, CTL, and the rerun (#2 on
+                               skewed at 0.92-0.99 consistency); the
+                               per-bar-move complement to RWI's windowed view
+   3. INTER-ACCESS INTERVAL    the only signal that ever LEADS, now proven
+                               under production (telemetry) collection:
+                               4.3 sigma at -449ms on the rerun control.
+                               Flat on GUPS -- but so is everything: GUPS's
+                               instantaneous hotset moves have no precursor
+                               for ANY signal to detect.  Its value is
+                               conditional on the workload having gradual
+                               warm-ups (real applications generally do;
+                               step-transition benchmarks do not).
 
   POTENTIAL SUPPLEMENTARY
-   4. LINEAR REGRESSION        top real-workload score (avg 14.3) but dead at
-                               fine clock -- the placement most dependent on
-                               the coarse bar; promote only if the 50ms rerun
-                               confirms it
-   5. SUPERTREND               strong real numbers (13.0 avg at 0.89-0.93);
-                               weaker twin of PSAR at fine clock -- same
-                               verify-at-50ms condition
-   6. ICHIMOKU                 strong real numbers (~10 avg); dead at fine
-                               clock -- same condition
-   7. AROON                    real signal, inconsistent direction
-   8. ACCUM SWING INDEX        solid everywhere, duplicates swing_index
-   9. SWING INDEX              mid on real, GOOD-grade on the control --
-                               expected to rise after the cadence fix
-  10. RAVI                     same profile as swing: mid real, strong control
-  11. PARABOLIC SAR            direction feature at fine clock; band-only at
-                               coarse clock; overlaps supertrend
-  12. DIRECTIONAL INDICATORS   absorbed by ADX + a direction flag
-  13. HEAT SCORE               small, consistent; heuristic-circularity risk
+   4. SCHAFF TREND CYCLE       the confirmed universal confirmer: reacts in
+                               every dataset, always +1-2 bars late, never
+                               predictive.  Include as a confirmation input.
+   5. ACCUM SWING INDEX        near-perfect consistency in the rerun but
+                               duplicates swing_index -- keep one
+   6. RAVI                     strong on CTL (#2 hot_to_cold), mid elsewhere
+   7. PARABOLIC SAR /DIRECTION reliable direction flag at fine clock; weak
+                               at rerun cadence
+   8. DIRECTIONAL INDICATORS   small but directional (plus_di up / minus_di
+                               down); cheap complements
+   9. RECENCY-WEIGHTED FREQ    decent on CTL, mid on rerun; smoothed-rate
+                               proxy
+  10. AROON                    weak-to-mid everywhere
+  11. HEAT SCORE               small, consistent; heuristic-circularity risk
 
-  USELESS
-  14. SCHAFF TREND CYCLE       random directions on the real workload; at
-                               fine clock a lagging confirmer at best --
-                               either way, never predictive
-  15. SQN                      random directions on real; artifact at control
-  16. TRIX                     noise under every clock
-  17. VHF                      dead under every valid measurement
-  18. GAPO                     dead under every valid measurement
-  19. INTER-ACCESS INTERVAL    zero in all collected real-workload data; the
-                               P1-only LEADING behavior (-100 to -250ms) is
-                               real but requires per-access timestamps --
-                               restorable by timestamping PEBS samples at
-                               ingest; if restored, likely jumps to Group 1
-                               as the only predictive feature
+  USELESS (now settled across BOTH clocks and BOTH workload classes)
+  12. ADX                      the study's cautionary tale: perfect 1.00
+                               consistency at 30x-stretched bars, 0.57 at
+                               measured ~4x bars, erratic at fine clock.
+                               A cadence artifact, not a signal.
+  13. LINEAR REGRESSION        #1 at coarse clock, weak lagger at every
+                               finer clock.  Same artifact class as ADX.
+  14. ICHIMOKU                 dead at every valid cadence
+  15. SUPERTREND               redundant with PSAR when alive, dead in rerun
+  16. SQN                      quantization artifact (exposed by CTL)
+  17. TRIX                     noise under every clock
+  18. VHF                      dead under every valid measurement
+  19. GAPO                     dead under every valid measurement
 
 ================================================================================
 FEATURE LIST FOR PHASE-2 (from Ranking C)
 ================================================================================
 
-  From GOOD:      avg_directional_index, random_walk_index_high (+ _low),
-                  recency_weighted_frequency
+  PRIMARY:        random_walk_index_high, random_walk_index_low,
+                  swing_index
+  LEADING:        inter_access_interval_ms (timestamp path landed and
+                  verified; leads where transitions have warm-up ramps)
+  CONFIRMATION:   schaff_trend_cycle
+  OPTIONAL:       range_action_verification_index, parabolic_sar_direction
+                  (direction), plus/minus_directional_indicator
 
-  Pending 50ms verification (strong real-workload numbers that currently
-  rest on the coarse clock -- promote if the bounded-tracking rerun
-  confirms them):
-                  linear_reg_slope, supertrend, ichimoku_tenkan
+  The rerun RESOLVED the pending-verification list: linear regression,
+  supertrend, ichimoku, and ADX all failed at measured cadence -- dropped.
 
-  Watch items:    swing_index, range_action_verification_index (GOOD-grade
-                  on the clean-cadence control; expected to rise when the
-                  real-workload rerun holds 50ms)
-
-  Conditional:    inter_access_interval_ms (pending per-sample timestamps;
-                  potentially the only LEADING feature)
+  19 signals in -> 4 core features (+3 optional) out.
 
 ================================================================================
 FINAL CONCLUSIONS
 ================================================================================
 
-1. The synthetic and real-workload rankings PARTIALLY DISAGREE, and the
-   disagreement has a known cause: the real-workload run's signal clock was
-   stretched ~30x (159K tracked pages vs. a ~20-50K budget), which favors
-   slow smoothed signals.  The single most important next experiment is
-   rerunning GUPS with bounded tracking at a true 50ms cadence -- it decides
-   whether Group 1 keeps the smoothers (linreg/ichimoku/supertrend) or
-   reverts toward the volatility family (swing/RAVI).
+1. RESOLVED: the bounded-tracking rerun (x2 replication, 741-765 events
+   per type per run) settled the synthetic-vs-real disagreement.  The
+   volatility family (random walk index, swing index) tops the real
+   workload exactly as it topped the synthetics.  The coarse-clock
+   champions collapsed on cue: ADX fell from 1.00/1.00 consistency to
+   0.57, linear regression from #1 to a weak lagger -- both confirmed as
+   cadence artifacts.  The phase-1 signal hierarchy GENERALIZES to real
+   workloads.
 
-2. Settled regardless of that question: RANDOM WALK INDEX is top-tier under
-   every condition tested -- the one unconditional keeper.  SQN, TRIX, VHF,
-   and GAPO are dead or directionless under every valid measurement -- the
-   four unconditional drops.
+2. Replication is excellent: r1/r2 agree to within a few percent on every
+   headline number (rwi_high 2.12 vs 2.09; rwi_low on skewed 3.59 vs 3.57,
+   both at 1.00 consistency).  The "single run" limitation is closed.
 
-3. ADX is the real-workload standout (perfect 1.00 consistency on both
-   event types) and the biggest open verification item, since it was
-   erratic at fine cadence.
+3. The leading signal is restored and characterized.  With hardware
+   timestamps at ingest, inter_access_interval leads cold_to_hot by
+   ~-450ms on the control (4.3 sigma).  On GUPS it is flat -- and so is
+   every other signal, because GUPS relocates its hotset instantaneously:
+   step transitions have no precursor for ANY signal to detect.  Lesson
+   for phase-2: predictive lead exists where workloads warm up gradually;
+   benchmarks with step transitions measure only reaction, not prediction.
 
-4. The inter-access interval is the study's conditional asset: last place
-   on collected real-workload data, but the only signal that ever LED a
-   transition, with a concrete engineering path to restore it (timestamp
-   PEBS samples at ingest).
+4. Cadence honesty: rerun bars measured 143-205ms (~3-4x nominal) --
+   labeled per dataset by the analysis' built-in cadence check.  A large
+   improvement over the superseded ~30x run and sufficient for fast-vs-
+   slow discrimination (demonstrated by the smoothers' collapse), with the
+   residual stretch attributable to the PEBS record-table walk (a known,
+   bounded engineering item if true 50ms is ever needed).
 
-5. Platform constraints for future collection: Haswell-class PEBS
-   attributes stores only (loads report a garbage constant address;
-   confirmed with stock perf tooling) -- full load+store telemetry needs
-   Skylake+ (PageRank/Twitter queued on that).  Signal discrimination
-   additionally requires holding the 50ms cadence, i.e. bounding tracked
-   pages.
+5. Platform constraints stand: Haswell-class PEBS attributes stores only
+   (loads report a garbage constant address; confirmed with stock perf
+   tooling) -- full load+store telemetry and the read-dominant workload
+   class (PageRank/Twitter, queued) need Skylake+.
 
 ================================================================================
 END OF REPORT

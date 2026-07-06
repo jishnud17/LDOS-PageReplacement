@@ -19,3 +19,7 @@ tot_gups.txt
 *~
 .vscode/
 .idea/
+
+# Python bytecode
+__pycache__/
+*.pyc

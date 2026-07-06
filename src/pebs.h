@@ -127,6 +127,12 @@ void pebs_clear_records(void);
  */
 void pebs_print_status(void);
 
+/**
+ * Debug: print the top-N sampled pages (vaddr + read/write sample counts).
+ * Enabled at shutdown via LDOS_PEBS_DEBUG=1.
+ */
+void pebs_debug_dump_top(int topn);
+
 #else /* !__linux__ */
 
 /* Stub interface for non-Linux platforms */
@@ -138,6 +144,7 @@ static inline bool pebs_is_active(void) { return false; }
 static inline void pebs_merge_with_page_stats(void) {}
 static inline void pebs_clear_records(void) {}
 static inline void pebs_print_status(void) {}
+static inline void pebs_debug_dump_top(int topn) { (void)topn; }
 
 #endif /* __linux__ */
 

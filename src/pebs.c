@@ -480,6 +480,48 @@ pebs_stats_t pebs_get_stats(void) {
   return stats;
 }
 
+/*
+ * Debug aid (LDOS_PEBS_DEBUG=1): print the top-N sampled pages so we can see
+ * WHERE samples actually land -- compare against the "Registered region"
+ * base+length lines in the run log to tell in-region from out-of-region.
+ * Motivated by the twitter run: 196K read samples collected, zero pages
+ * created, i.e. seemingly no samples inside the managed regions.
+ */
+void pebs_debug_dump_top(int topn) {
+  if (!pebs_state.initialized || topn <= 0)
+    return;
+  if (topn > 64) topn = 64;
+
+  pebs_page_record_t *top[64] = {0};
+  uint64_t total_records = 0;
+
+  pthread_rwlock_rdlock(&pebs_state.records_lock);
+  for (size_t i = 0; i < PEBS_HASH_SIZE; i++) {
+    for (pebs_page_record_t *rec = pebs_state.records[i]; rec != NULL;
+         rec = rec->next) {
+      total_records++;
+      /* replace the current minimum if this record has more samples */
+      int min_idx = 0;
+      uint64_t min_val = UINT64_MAX;
+      for (int k = 0; k < topn; k++) {
+        uint64_t v = top[k] ? top[k]->read_samples + top[k]->write_samples : 0;
+        if (v < min_val) { min_val = v; min_idx = k; }
+      }
+      if (rec->read_samples + rec->write_samples > min_val)
+        top[min_idx] = rec;
+    }
+  }
+
+  TM_INFO("PEBS DEBUG: %" PRIu64 " distinct sampled pages; top %d by samples:",
+          total_records, topn);
+  for (int k = 0; k < topn; k++) {
+    if (top[k])
+      TM_INFO("  vaddr=0x%" PRIx64 "  reads=%" PRIu64 "  writes=%" PRIu64,
+              top[k]->vaddr, top[k]->read_samples, top[k]->write_samples);
+  }
+  pthread_rwlock_unlock(&pebs_state.records_lock);
+}
+
 void pebs_merge_with_page_stats(void) {
   if (!pebs_state.initialized)
     return;

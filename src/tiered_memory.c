@@ -155,6 +155,11 @@ void tiered_manager_shutdown(void) {
           pstats.total_samples, pstats.read_samples, pstats.write_samples,
           pstats.throttle_events, pstats.errors);
 
+  /* Where did the samples actually land?  Compare the dumped vaddrs against
+   * the "Registered region" base+length lines earlier in the log. */
+  if (getenv("LDOS_PEBS_DEBUG") != NULL)
+    pebs_debug_dump_top(20);
+
   pebs_shutdown();
 
   /* Final statistics */

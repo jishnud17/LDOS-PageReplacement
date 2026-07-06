@@ -57,11 +57,18 @@ static volatile char g_workload_sink;
 static inline void hammer_page(char *data, size_t page_idx,
                                int n_access, int write_every) {
     volatile char *p = (volatile char *)&data[page_idx * PAGE_SIZE];
+    char acc = 0;
     for (int k = 0; k < n_access; k++) {
-        g_workload_sink = *p;                       /* read  (load uop)  */
+        acc ^= *p;                                  /* read  (load uop)  */
         if (write_every && (k % write_every == 0))
-            *p = (char)(g_workload_sink + 1);       /* write (store uop) */
+            *p = (char)(acc + 1);                   /* write (store uop) */
     }
+    /* Publish once, OUTSIDE the loop.  The old per-iteration store to this
+     * global made ~89% of the workload's stores hit one address; with PEBS
+     * sampling skid that starved region pages of store attribution
+     * (612K samples -> 64 unique pages in the telemetry-mode control run).
+     * Reads stay un-elidable because p is volatile. */
+    g_workload_sink = acc;
 }
 
 /* Fault every page in once so it is tracked before the access phase begins. */

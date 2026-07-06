@@ -1,0 +1,175 @@
+================================================================================
+FINAL SIGNAL CONCLUSIONS: PHASE-1 SYNTHETICS vs REAL-WORKLOAD VALIDATION
+LDOS PageReplacement -- heuristics-analysis branch
+Generated: 2026-07-06
+================================================================================
+
+Inputs:
+  results/phase1/phase1_reactivity_results.txt
+    3 synthetic workloads (hot_cold, sequential, temporal) under FULL
+    management (userfaultfd demand paging + write-protect counting + PEBS).
+  results/validation/real_workload_validation_results.txt
+    hot_cold control + GUPS hotset-move (HeMem benchmark) under
+    TELEMETRY-ONLY collection (PEBS hardware sampling alone).
+
+The control run makes the comparison valid: it re-runs a phase-1 workload
+under the validation collection method, separating "the measurement changed"
+from "the workload changed."
+
+================================================================================
+SIGNAL-BY-SIGNAL VERDICTS ACROSS ALL FIVE DATASETS
+================================================================================
+
+Legend: P1 = phase-1 synthetics, CTL = telemetry control, GUPS = hotset-move.
+Score = amplitude x consistency at the event-triggered average.
+
+--------------------------------------------------------------------------------
+CONSISTENT WINNERS (reactive everywhere, survive both method and workload)
+--------------------------------------------------------------------------------
+
+random_walk_index_high  (trend-vs-noise detector)
+  P1:   #1 signal in all 3 workloads, both event types (scores 1.1 - 7.0)
+  CTL:  top-5 both events (1.12 - 1.47), consistency up to 1.00
+  GUPS: consistency 1.00 on BOTH event types (7.3 sigma on cold_to_hot)
+  VERDICT: the most robust signal in the study.  Primary phase-2 feature.
+
+swing_index / accum_swing_index  (per-bar move size / its cumulative sum)
+  P1:   top-3 alongside rwi_high everywhere
+  CTL:  swing_index #1 on cold_to_hot (2.20 sigma); asi at consistency 1.00
+  GUPS: 1.0 - 7.0 sigma, consistency 0.83 - 0.94
+  VERDICT: confirmed.  Redundant with each other -- keep ONE (swing_index).
+
+random_walk_index_low  (short-window trend)
+  P1:   consistently present, ~60-80% of rwi_high's score
+  CTL:  #1 on hot_to_cold (1.64), consistency 0.96
+  GUPS: 0.93 consistency
+  VERDICT: promoted.  The short window catches demotions the long window
+  smooths over; keep BOTH rwi variants.
+
+range_action_verification_index  (short-vs-long MA momentum)
+  P1:   mid-field
+  CTL:  #2 on hot_to_cold (1.57) at 0.96 consistency
+  GUPS: consistency 1.00 on hot_to_cold
+  VERDICT: promoted from phase-1's "optional" to candidate.
+
+parabolic_sar / parabolic_sar_direction  (trend-flip level / flag)
+  P1:   psar_dir a reliable coincident direction flag (0.24 - 1.11)
+  CTL:  both ~0.75 - 1.00, coincident
+  GUPS: psar 4.99 on hot_to_cold (psar_dir noisy at coarse cadence)
+  VERDICT: confirmed as the cheap direction feature.
+
+--------------------------------------------------------------------------------
+CONFIRMED ROLE PLAYER (reacts, but always late)
+--------------------------------------------------------------------------------
+
+schaff_trend_cycle  (cycle detector)
+  P1:   consistent (0.74 - 0.93) but lags +50 to +100ms in all 3 workloads
+  CTL:  identical behavior: 0.95 consistency, +50 to +150ms lag
+  GUPS: collapses at coarse cadence (0.41 consistency) -- it needs multiple
+        bars to confirm, and coarse bars deny it that
+  VERDICT: keep as a CONFIRMATION feature only.  Never predictive.
+
+--------------------------------------------------------------------------------
+METHOD-DEPENDENT (the two most important nuanced findings)
+--------------------------------------------------------------------------------
+
+inter_access_interval_ms  (mean time gap between accesses)
+  P1:   the ONLY signal that LED transitions: cold_to_hot by 100-250ms,
+        scores up to 3.2 (temporal workload).  The headline phase-1 finding.
+  CTL:  dead (0.01).   GUPS: dead (0.001).
+  WHY:  not a workload effect -- a measurement-granularity effect.  Phase-1's
+        userfaultfd faults timestamped each access individually; telemetry
+        mode quantizes access times to the 10ms PEBS merge cadence, which
+        destroys the gap structure the signal measures.
+  VERDICT: the predictive lead is real but CONDITIONAL on per-access
+  timestamps.  Becomes a phase-2 engineering requirement (timestamp PEBS
+  samples at ingest -- perf records carry timestamps; we currently discard
+  them at merge), not a ready-made feature.
+
+system_quality_number  (mean/std of rate changes)
+  P1:   top-3 with rwi_high/swing_index (up to 5.5 sigma, 0.96-1.00 consist)
+  CTL:  collapsed to 0.04.   GUPS: amplitude present but 0.24 consistency.
+  WHY:  PEBS-estimated rates move in sampling-period-sized quanta (x5003);
+        the quantization inflates SQN's std denominator.
+  VERDICT: artifact-sensitive.  DROP from the shortlist.  Also a caution:
+  phase-1's sqn/rwi/si "top trio" was partially an artifact of the smoother
+  UFFD-derived rate series.
+
+--------------------------------------------------------------------------------
+CONSISTENT LOSERS (dead weight under every valid measurement)
+--------------------------------------------------------------------------------
+
+ichimoku family (5 slow moving averages): near-zero in P1 and CTL; their
+  high GUPS rank is a coarse-cadence artifact.  DROP.
+linear_reg_slope / intercept: same pattern as ichimoku.  DROP.
+triple_exp_rate_of_change (TRIX): high amplitude / near-random consistency
+  in P1; nothing in CTL.  DROP.
+vertical_horizontal_filter, gopalakrishnan_range_index: moderate in P1,
+  near-zero in CTL.  Their P1 signal likely rode on the smoother UFFD rate
+  series (same mechanism as SQN).  DROP.
+inter_access_variance_ms2: weak companion of the interval signal.  DROP.
+aroon_up/aroon_down/aroon_oscillator: middling everywhere at 50ms cadence
+  (aroon_down's #2 GUPS rank is the cadence artifact).  DROP.
+supertrend / supertrend_direction, plus/minus_directional_indicator,
+  avg_directional_index: redundant with psar_dir at valid cadence; ADX/
+  supertrend GUPS ranks are cadence artifacts.  DROP (minus_di optional).
+heat_score, recency_weighted_frequency, raw access_rate: never better than
+  mid-field under valid measurement.  DROP as model features (raw rate stays
+  in the data as the underlying series).
+
+================================================================================
+FINAL FEATURE LIST FOR PHASE-2
+================================================================================
+
+  PRIMARY (reactive, consistent, survive method + workload change):
+    1. random_walk_index_high   -- trend-vs-noise, long window
+    2. random_walk_index_low    -- trend-vs-noise, short window
+    3. swing_index              -- per-bar move size
+    4. range_action_verification_index -- short-vs-long MA momentum
+
+  CONFIRMATION / DIRECTION:
+    5. schaff_trend_cycle       -- lagging trend confirmer
+    6. parabolic_sar_direction  -- coincident +1/-1 direction flag
+
+  CONDITIONAL (pending engineering):
+    7. inter_access_interval_ms -- the only LEADING signal; requires
+       per-access timestamps (add PEBS sample timestamps at ingest)
+
+  DROPPED: system_quality_number, accum_swing_index (keep swing_index),
+  ichimoku family, linear regression pair, TRIX, VHF, GAPO, aroon family,
+  supertrend pair, DI/ADX family, inter_access_variance, heat_score,
+  recency_weighted_frequency.
+
+  19 signals in, 6 features + 1 conditional out.
+
+================================================================================
+FINAL CONCLUSIONS
+================================================================================
+
+1. The core signal hierarchy is real.  The random-walk / swing-index
+   volatility family tops every dataset where the 50ms cadence held --
+   across two collection methods and on a real benchmark's transitions
+   (rwi_high: 1.00 consistency on GUPS events).
+
+2. The predictive-lead finding survives, with a condition attached.
+   inter_access_interval_ms leads transitions only when accesses carry
+   individual timestamps.  This converts a phase-1 observation into a
+   concrete phase-2 design requirement rather than invalidating it.
+
+3. Two phase-1 signals were exposed as measurement artifacts (SQN
+   materially; VHF/GAPO likely) by changing the collection method --
+   exactly the kind of error the control run existed to catch.
+
+4. Platform requirements are now characterized: Haswell-class PEBS
+   attributes stores only (loads report garbage addresses -- confirmed
+   with stock perf tooling); full load+store telemetry needs Skylake+.
+   Signal discrimination additionally requires holding the 50ms cadence,
+   which requires bounding tracked pages (~20-50K max on current code).
+
+5. Remaining validation gaps, in priority order: (a) bounded tracking ->
+   clean GUPS rankings; (b) Skylake node -> PageRank/Twitter, the
+   read-dominant workload class; (c) replication runs.
+
+================================================================================
+END OF REPORT
+================================================================================

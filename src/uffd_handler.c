@@ -100,16 +100,21 @@ int register_managed_region(void *addr, size_t length) {
     return -1;
   }
 
-  struct uffdio_register uffdio_register = {
-      .range = {.start = (unsigned long)addr, .len = length},
-      .mode = UFFDIO_REGISTER_MODE_MISSING |
-              (g_manager.uffd_wp_supported ? UFFDIO_REGISTER_MODE_WP : 0)};
+  /* Telemetry-only mode: record the region (so PEBS merge can filter to it)
+   * but do NOT register with userfaultfd -- pages fault in natively at full
+   * speed and access data comes exclusively from PEBS sampling. */
+  if (!g_manager.telemetry_only) {
+    struct uffdio_register uffdio_register = {
+        .range = {.start = (unsigned long)addr, .len = length},
+        .mode = UFFDIO_REGISTER_MODE_MISSING |
+                (g_manager.uffd_wp_supported ? UFFDIO_REGISTER_MODE_WP : 0)};
 
-  if (ioctl(g_manager.uffd, UFFDIO_REGISTER, &uffdio_register) < 0) {
-    TM_ERROR("UFFDIO_REGISTER failed for %p+%zu: %s", addr, length,
-             strerror(errno));
-    pthread_mutex_unlock(&g_manager.regions_lock);
-    return -1;
+    if (ioctl(g_manager.uffd, UFFDIO_REGISTER, &uffdio_register) < 0) {
+      TM_ERROR("UFFDIO_REGISTER failed for %p+%zu: %s", addr, length,
+               strerror(errno));
+      pthread_mutex_unlock(&g_manager.regions_lock);
+      return -1;
+    }
   }
 
   g_manager.regions[slot] = (managed_region_t){.base_addr = addr,
@@ -127,9 +132,11 @@ void unregister_managed_region(void *addr) {
   pthread_mutex_lock(&g_manager.regions_lock);
   for (int i = 0; i < MAX_MANAGED_REGIONS; i++) {
     if (g_manager.regions[i].active && g_manager.regions[i].base_addr == addr) {
-      struct uffdio_range range = {.start = (unsigned long)addr,
-                                   .len = g_manager.regions[i].length};
-      ioctl(g_manager.uffd, UFFDIO_UNREGISTER, &range);
+      if (!g_manager.telemetry_only) {
+        struct uffdio_range range = {.start = (unsigned long)addr,
+                                     .len = g_manager.regions[i].length};
+        ioctl(g_manager.uffd, UFFDIO_UNREGISTER, &range);
+      }
       g_manager.regions[i].active = false;
       g_manager.region_count--;
       TM_INFO("Unregistered region: %p", addr);
@@ -310,6 +317,7 @@ void stop_uffd_handler(void) {
  */
 void reprotect_all_tracked_pages(void) {
   if (!g_manager.uffd_wp_supported) return;
+  if (g_manager.telemetry_only) return;  /* no WP registration to re-arm */
 
   pthread_rwlock_rdlock(&g_manager.stats_lock);
   for (size_t i = 0; i < PAGE_STATS_HASH_SIZE; i++) {
@@ -330,10 +338,12 @@ void cleanup_userfaultfd(void) {
   pthread_mutex_lock(&g_manager.regions_lock);
   for (int i = 0; i < MAX_MANAGED_REGIONS; i++) {
     if (g_manager.regions[i].active) {
-      struct uffdio_range range = {
-          .start = (unsigned long)g_manager.regions[i].base_addr,
-          .len = g_manager.regions[i].length};
-      ioctl(g_manager.uffd, UFFDIO_UNREGISTER, &range);
+      if (!g_manager.telemetry_only) {
+        struct uffdio_range range = {
+            .start = (unsigned long)g_manager.regions[i].base_addr,
+            .len = g_manager.regions[i].length};
+        ioctl(g_manager.uffd, UFFDIO_UNREGISTER, &range);
+      }
       g_manager.regions[i].active = false;
     }
   }

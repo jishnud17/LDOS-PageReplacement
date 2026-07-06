@@ -232,29 +232,33 @@ static void *policy_thread_loop(void *arg) {
         reprotect_all_tracked_pages();
     }
 
-    uint32_t migrations = 0;
-    pthread_rwlock_rdlock(&g_manager.stats_lock);
+    /* Telemetry-only mode: no migrations -- pages are not under uffd
+     * management, so tier moves would be meaningless bookkeeping. */
+    if (!g_manager.telemetry_only) {
+      uint32_t migrations = 0;
+      pthread_rwlock_rdlock(&g_manager.stats_lock);
 
-    for (size_t i = 0; i < PAGE_STATS_HASH_SIZE &&
-                       migrations < g_policy_config.max_migrations_per_cycle;
-         i++) {
+      for (size_t i = 0; i < PAGE_STATS_HASH_SIZE &&
+                         migrations < g_policy_config.max_migrations_per_cycle;
+           i++) {
 
-      page_stats_t *entry = g_manager.page_stats_table[i];
-      while (entry != NULL &&
-             migrations < g_policy_config.max_migrations_per_cycle) {
-        migration_decision_t decision = {0};
+        page_stats_t *entry = g_manager.page_stats_table[i];
+        while (entry != NULL &&
+               migrations < g_policy_config.max_migrations_per_cycle) {
+          migration_decision_t decision = {0};
 
-        if (predict_migration(entry, &decision) &&
-            decision.confidence >= g_policy_config.confidence_min) {
-          pthread_rwlock_unlock(&g_manager.stats_lock);
-          if (execute_migration(&decision) == 0)
-            migrations++;
-          pthread_rwlock_rdlock(&g_manager.stats_lock);
+          if (predict_migration(entry, &decision) &&
+              decision.confidence >= g_policy_config.confidence_min) {
+            pthread_rwlock_unlock(&g_manager.stats_lock);
+            if (execute_migration(&decision) == 0)
+              migrations++;
+            pthread_rwlock_rdlock(&g_manager.stats_lock);
+          }
+          entry = entry->next;
         }
-        entry = entry->next;
       }
+      pthread_rwlock_unlock(&g_manager.stats_lock);
     }
-    pthread_rwlock_unlock(&g_manager.stats_lock);
 
     /* Update predictive signals then export, every 5 cycles (50ms).
      * One signal "bar" per export keeps the window cadence aligned to rows. */
@@ -286,12 +290,15 @@ int start_policy_thread(void) {
   snprintf(csv_filename, sizeof(csv_filename), "ml_dataset_%s.csv", g_csv_label);
   g_csv_file = fopen(csv_filename, "w");
   if (g_csv_file) {
+      /* Descriptive signal names (column order matches the fprintf in
+       * export_page_stats_to_csv; reactivity_analysis.py maps the old
+       * abbreviated names from phase-1 CSVs onto these). */
       fprintf(g_csv_file,
               "cycle,timestamp_ns,page_addr,current_tier,heat_score,access_count,read_count,write_count,migration_count,access_rate,"
-              "interval_access_rate,si,asi,aroon_up,aroon_down,aroon_osc,adx,plus_di,minus_di,gapo,"
-              "ich_tenkan,ich_kijun,ich_senkou_a,ich_senkou_b,ich_chikou,linreg_slope,linreg_intercept,psar,psar_dir,rwi_high,"
-              "rwi_low,ravi,stc,stc_signal,supertrend_dir,supertrend,sqn,trix,vhf,inter_access_interval_ms,"
-              "inter_access_variance_ms2,recency_weighted_freq\n");
+              "interval_access_rate,swing_index,accum_swing_index,aroon_up,aroon_down,aroon_oscillator,avg_directional_index,plus_directional_indicator,minus_directional_indicator,gopalakrishnan_range_index,"
+              "ichimoku_tenkan,ichimoku_kijun,ichimoku_senkou_a,ichimoku_senkou_b,ichimoku_chikou,linear_reg_slope,linear_reg_intercept,parabolic_sar,parabolic_sar_direction,random_walk_index_high,"
+              "random_walk_index_low,range_action_verification_index,schaff_trend_cycle,schaff_trend_cycle_signal,supertrend_direction,supertrend,system_quality_number,triple_exp_rate_of_change,vertical_horizontal_filter,inter_access_interval_ms,"
+              "inter_access_variance_ms2,recency_weighted_frequency\n");
       TM_INFO("CSV output: %s", csv_filename);
   }
 

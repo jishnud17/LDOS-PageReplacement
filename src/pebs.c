@@ -93,6 +93,22 @@ static inline uint64_t page_align_addr(uint64_t addr) {
   return addr & ~(PAGE_SIZE - 1);
 }
 
+/*
+ * Page sampling divisor (LDOS_PAGE_SAMPLE_DIVISOR, default 1 = every page).
+ * When N > 1, only pages whose page-frame number satisfies pfn % N == 0 are
+ * tracked.  This bounds the page-stats table (and therefore signal-compute
+ * and CSV-export cost) on huge workloads: a 12GB graph is ~3M pages, but the
+ * policy thread can only sustain phase-1 cadence at ~10-50K tracked pages.
+ * Sampling pages -- rather than truncating at the table cap -- keeps the
+ * tracked set spread uniformly across the whole region.
+ */
+static uint64_t g_page_sample_divisor = 1;
+
+static inline int page_is_sampled(uint64_t aligned_addr) {
+  if (g_page_sample_divisor <= 1) return 1;
+  return ((aligned_addr >> 12) % g_page_sample_divisor) == 0;
+}
+
 static pebs_page_record_t *get_or_create_record(uint64_t vaddr) {
   uint64_t aligned = page_align_addr(vaddr);
   size_t bucket = hash_addr(aligned);
@@ -183,6 +199,11 @@ static void process_sample(struct perf_sample *ps, pebs_sample_type_t type) {
   if (ps->addr == 0)
     return;
 
+  /* Page-sampling: drop samples for non-selected pages up front so the
+   * record table (and everything downstream) stays bounded. */
+  if (!page_is_sampled(page_align_addr(ps->addr)))
+    return;
+
   pebs_page_record_t *rec = get_or_create_record(ps->addr);
   if (rec == NULL) {
     atomic_fetch_add(&pebs_state.errors, 1);
@@ -263,6 +284,16 @@ int pebs_init(void) {
   }
 
   TM_INFO("Initializing PEBS subsystem...");
+
+  /* Optional page sampling to bound tracked-page count on huge workloads. */
+  const char *divisor_env = getenv("LDOS_PAGE_SAMPLE_DIVISOR");
+  if (divisor_env != NULL) {
+    long v = atol(divisor_env);
+    if (v > 1) {
+      g_page_sample_divisor = (uint64_t)v;
+      TM_INFO("Page sampling enabled: tracking 1 of every %ld pages", v);
+    }
+  }
 
   /* Initialize lock */
   if (pthread_rwlock_init(&pebs_state.records_lock, NULL) != 0) {
@@ -419,11 +450,45 @@ void pebs_merge_with_page_stats(void) {
   if (!pebs_state.initialized)
     return;
 
+  /* In telemetry-only mode page_stats entries are created exclusively here
+   * (no uffd faults), and PEBS samples the WHOLE address space -- stack,
+   * code, allocator metadata.  Snapshot the managed regions once so we only
+   * admit pages that belong to a registered region.  In full-management
+   * mode keep historical behavior (merge everything PEBS saw). */
+  struct { void *base; size_t len; } regions[MAX_MANAGED_REGIONS];
+  int nregions = 0;
+  if (g_manager.telemetry_only) {
+    pthread_mutex_lock(&g_manager.regions_lock);
+    for (int i = 0; i < MAX_MANAGED_REGIONS; i++) {
+      if (g_manager.regions[i].active) {
+        regions[nregions].base = g_manager.regions[i].base_addr;
+        regions[nregions].len  = g_manager.regions[i].length;
+        nregions++;
+      }
+    }
+    pthread_mutex_unlock(&g_manager.regions_lock);
+  }
+
   pthread_rwlock_rdlock(&pebs_state.records_lock);
 
   for (size_t i = 0; i < PEBS_HASH_SIZE; i++) {
     pebs_page_record_t *rec = pebs_state.records[i];
     while (rec != NULL) {
+      if (g_manager.telemetry_only) {
+        int in_region = 0;
+        for (int r = 0; r < nregions; r++) {
+          if ((char *)rec->vaddr >= (char *)regions[r].base &&
+              (char *)rec->vaddr < (char *)regions[r].base + regions[r].len) {
+            in_region = 1;
+            break;
+          }
+        }
+        if (!in_region) {
+          rec = rec->next;
+          continue;
+        }
+      }
+
       /* Get or create corresponding page_stats entry */
       page_stats_t *stats = get_or_create_page_stats((void *)rec->vaddr);
       if (stats != NULL) {

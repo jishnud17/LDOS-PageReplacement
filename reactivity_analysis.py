@@ -46,6 +46,38 @@ META_COLS = {
 }
 STEP_MS = 50  # one exported row per 5 policy cycles = 50 ms
 
+# Phase-1 CSVs used abbreviated signal names; the exporter now writes
+# descriptive ones.  Normalize old files on load so rankings and the final
+# old-vs-new comparison line up on identical names.
+COLUMN_RENAMES = {
+    "si":               "swing_index",
+    "asi":              "accum_swing_index",
+    "aroon_osc":        "aroon_oscillator",
+    "adx":              "avg_directional_index",
+    "plus_di":          "plus_directional_indicator",
+    "minus_di":         "minus_directional_indicator",
+    "gapo":             "gopalakrishnan_range_index",
+    "ich_tenkan":       "ichimoku_tenkan",
+    "ich_kijun":        "ichimoku_kijun",
+    "ich_senkou_a":     "ichimoku_senkou_a",
+    "ich_senkou_b":     "ichimoku_senkou_b",
+    "ich_chikou":       "ichimoku_chikou",
+    "linreg_slope":     "linear_reg_slope",
+    "linreg_intercept": "linear_reg_intercept",
+    "psar":             "parabolic_sar",
+    "psar_dir":         "parabolic_sar_direction",
+    "rwi_high":         "random_walk_index_high",
+    "rwi_low":          "random_walk_index_low",
+    "ravi":             "range_action_verification_index",
+    "stc":              "schaff_trend_cycle",
+    "stc_signal":       "schaff_trend_cycle_signal",
+    "supertrend_dir":   "supertrend_direction",
+    "sqn":              "system_quality_number",
+    "trix":             "triple_exp_rate_of_change",
+    "vhf":              "vertical_horizontal_filter",
+    "recency_weighted_freq": "recency_weighted_frequency",
+}
+
 SPARK = "▁▂▃▄▅▆▇█"
 
 
@@ -63,6 +95,7 @@ def ascii_spark(traj, center_idx):
 def load_prepare(path):
     """Load one CSV, sort by page then cycle, return df + list of signal columns."""
     df = pd.read_csv(path)
+    df = df.rename(columns=COLUMN_RENAMES)   # normalize phase-1 abbreviated names
     df = df.sort_values(["page_addr", "cycle"]).reset_index(drop=True)
     signal_cols = [c for c in df.columns
                    if c not in META_COLS and pd.api.types.is_numeric_dtype(df[c])]

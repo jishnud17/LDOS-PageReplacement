@@ -69,6 +69,14 @@ int tiered_manager_init(void) {
 
   TM_INFO("Initializing tiered memory manager...");
 
+  /* Telemetry-only mode: PEBS sampling + signal computation without
+   * userfaultfd demand paging or migrations (see tiered_memory.h). */
+  const char *telemetry = getenv("LDOS_PEBS_TELEMETRY_ONLY");
+  g_manager.telemetry_only = (telemetry != NULL && telemetry[0] == '1');
+  if (g_manager.telemetry_only)
+    TM_INFO("TELEMETRY-ONLY mode: uffd paging + migrations disabled, "
+            "PEBS tracking active");
+
   /* Initialize synchronization primitives */
   if (pthread_mutex_init(&g_manager.regions_lock, NULL) != 0 ||
       pthread_rwlock_init(&g_manager.stats_lock, NULL) != 0 ||

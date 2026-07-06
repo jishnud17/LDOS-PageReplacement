@@ -191,6 +191,12 @@ typedef struct tiered_manager {
     bool initialized;
     int uffd;
     bool uffd_wp_supported;
+
+    /* LDOS_PEBS_TELEMETRY_ONLY=1: collect PEBS access telemetry + signals
+     * without userfaultfd demand paging or migrations.  Used for signal
+     * discovery on large real workloads where per-page fault handling is
+     * prohibitively slow (e.g. multi-GB graphs).  Default: full management. */
+    bool telemetry_only;
     
     /* Threads */
     pthread_t uffd_thread;

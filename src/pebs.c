@@ -46,16 +46,25 @@ struct perf_sample {
   __u64 weight;   /* Access latency (cycles) */
 };
 
-/* PEBS state */
+/* Upper bound on tracked CPUs (c220g* nodes have 40 hw threads). */
+#define PEBS_MAX_CPUS 256
+
+/* PEBS state.
+ * Events are opened per-CPU (pid=0, cpu=N) with attr.inherit=1 so that
+ * worker threads created after init are sampled too.  The kernel refuses
+ * to mmap a ring buffer on an inherited event with cpu=-1 (EINVAL), so a
+ * single task-wide event cannot work -- this per-CPU layout is the same
+ * approach perf record uses. */
 static struct {
   bool initialized;
   bool running;
+  int ncpus;
 
-  /* Perf event file descriptors */
-  int perf_fd[PEBS_SAMPLE_TYPE_COUNT];
+  /* Perf event file descriptors, per type per CPU */
+  int perf_fd[PEBS_SAMPLE_TYPE_COUNT][PEBS_MAX_CPUS];
 
-  /* Memory-mapped ring buffers */
-  struct perf_event_mmap_page *perf_page[PEBS_SAMPLE_TYPE_COUNT];
+  /* Memory-mapped ring buffers, per type per CPU */
+  struct perf_event_mmap_page *perf_page[PEBS_SAMPLE_TYPE_COUNT][PEBS_MAX_CPUS];
   size_t mmap_size;
 
   /* Collector thread */
@@ -153,7 +162,7 @@ static pebs_page_record_t *get_or_create_record(uint64_t vaddr) {
   return rec;
 }
 
-static int setup_perf_event(__u64 config, __u64 config1, int precise,
+static int setup_perf_event(__u64 config, __u64 config1, int precise, int cpu,
                             int *fd_out,
                             struct perf_event_mmap_page **page_out) {
   struct perf_event_attr attr;
@@ -169,25 +178,23 @@ static int setup_perf_event(__u64 config, __u64 config1, int precise,
   attr.disabled = 1; /* Start disabled */
   attr.inherit = 1;  /* Sample threads created after open (pthread/OpenMP
                       * workers), not just the opening thread.  Inherited
-                      * events redirect their output into this event's ring
-                      * buffer, same mechanism perf record uses.  Without
-                      * this, GUPS-style workloads (main thread only spawns
-                      * and joins) produce almost no samples. */
+                      * events require per-CPU opens (cpu >= 0): the kernel
+                      * refuses ring-buffer mmap on inherited cpu=-1 events. */
   attr.exclude_kernel = 1;
   attr.exclude_hv = 1;
   attr.exclude_callchain_kernel = 1;
   attr.exclude_callchain_user = 1;
   attr.precise_ip = precise; /* Load latency facility needs 2; stores use 1 */
 
-  int fd = perf_event_open(&attr, 0, -1, -1, 0);
+  int fd = perf_event_open(&attr, 0, cpu, -1, 0);
   while (fd == -1 && attr.precise_ip > 1) {
     /* Some kernels/CPUs reject precise_ip=2; degrade and retry. */
     attr.precise_ip--;
-    fd = perf_event_open(&attr, 0, -1, -1, 0);
+    fd = perf_event_open(&attr, 0, cpu, -1, 0);
   }
   if (fd == -1) {
-    TM_ERROR("perf_event_open failed: %s (config=0x%llx)", strerror(errno),
-             (unsigned long long)config);
+    TM_ERROR("perf_event_open failed: %s (config=0x%llx cpu=%d)",
+             strerror(errno), (unsigned long long)config, cpu);
     return -1;
   }
 
@@ -196,7 +203,7 @@ static int setup_perf_event(__u64 config, __u64 config1, int precise,
       mmap(NULL, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 
   if (page == MAP_FAILED) {
-    TM_ERROR("mmap for perf buffer failed: %s", strerror(errno));
+    TM_ERROR("mmap for perf buffer failed: %s (cpu=%d)", strerror(errno), cpu);
     close(fd);
     return -1;
   }
@@ -206,6 +213,22 @@ static int setup_perf_event(__u64 config, __u64 config1, int precise,
   pebs_state.mmap_size = mmap_size;
 
   return 0;
+}
+
+/* Release every open event fd + ring buffer (init failure and shutdown). */
+static void pebs_close_all_events(void) {
+  for (int t = 0; t < PEBS_SAMPLE_TYPE_COUNT; t++) {
+    for (int c = 0; c < pebs_state.ncpus; c++) {
+      if (pebs_state.perf_page[t][c] != NULL) {
+        munmap(pebs_state.perf_page[t][c], pebs_state.mmap_size);
+        pebs_state.perf_page[t][c] = NULL;
+      }
+      if (pebs_state.perf_fd[t][c] > 0) {
+        close(pebs_state.perf_fd[t][c]);
+        pebs_state.perf_fd[t][c] = 0;
+      }
+    }
+  }
 }
 
 static void process_sample(struct perf_sample *ps, pebs_sample_type_t type) {
@@ -256,8 +279,8 @@ static void ring_copy(void *dst, const char *pbuf, uint64_t size,
   }
 }
 
-static void drain_buffer(pebs_sample_type_t type) {
-  struct perf_event_mmap_page *p = pebs_state.perf_page[type];
+static void drain_buffer(pebs_sample_type_t type, int cpu) {
+  struct perf_event_mmap_page *p = pebs_state.perf_page[type][cpu];
   if (p == NULL)
     return;
 
@@ -311,7 +334,9 @@ static void *collector_thread_fn(void *arg) {
 
   while (pebs_state.collector_running) {
     for (int i = 0; i < PEBS_SAMPLE_TYPE_COUNT; i++) {
-      drain_buffer(i);
+      for (int c = 0; c < pebs_state.ncpus; c++) {
+        drain_buffer(i, c);
+      }
     }
     usleep(1000); /* 1ms polling interval */
   }
@@ -348,26 +373,33 @@ int pebs_init(void) {
     return -1;
   }
 
-  /* Setup read sampling: load latency facility (guaranteed DataLA capture) */
-  if (setup_perf_event(PEBS_EVENT_MEM_LOADS, PEBS_LOAD_LATENCY_THRESHOLD, 2,
-                       &pebs_state.perf_fd[PEBS_SAMPLE_READ],
-                       &pebs_state.perf_page[PEBS_SAMPLE_READ]) < 0) {
-    TM_ERROR("Failed to setup PEBS for reads - PEBS may be unavailable");
-    TM_INFO("Check: Intel CPU with PEBS, perf_event_paranoid <= 2");
-    pthread_rwlock_destroy(&pebs_state.records_lock);
-    return -1;
-  }
+  /* One event per CPU per type (inherit=1 requires per-CPU ring buffers). */
+  long online = sysconf(_SC_NPROCESSORS_ONLN);
+  pebs_state.ncpus = (online > PEBS_MAX_CPUS) ? PEBS_MAX_CPUS : (int)online;
+  TM_INFO("PEBS: opening events on %d CPUs (loads + stores)",
+          pebs_state.ncpus);
 
-  /* Setup write sampling (memory stores) */
-  if (setup_perf_event(PEBS_EVENT_MEM_STORES, 0, 1,
-                       &pebs_state.perf_fd[PEBS_SAMPLE_WRITE],
-                       &pebs_state.perf_page[PEBS_SAMPLE_WRITE]) < 0) {
-    TM_ERROR("Failed to setup PEBS for writes");
-    /* Cleanup read fd */
-    munmap(pebs_state.perf_page[PEBS_SAMPLE_READ], pebs_state.mmap_size);
-    close(pebs_state.perf_fd[PEBS_SAMPLE_READ]);
-    pthread_rwlock_destroy(&pebs_state.records_lock);
-    return -1;
+  for (int c = 0; c < pebs_state.ncpus; c++) {
+    /* Read sampling: load latency facility (guaranteed DataLA capture) */
+    if (setup_perf_event(PEBS_EVENT_MEM_LOADS, PEBS_LOAD_LATENCY_THRESHOLD, 2,
+                         c, &pebs_state.perf_fd[PEBS_SAMPLE_READ][c],
+                         &pebs_state.perf_page[PEBS_SAMPLE_READ][c]) < 0) {
+      TM_ERROR("Failed to setup PEBS loads on cpu %d - PEBS may be unavailable", c);
+      TM_INFO("Check: Intel CPU with PEBS, perf_event_paranoid <= 2");
+      pebs_close_all_events();
+      pthread_rwlock_destroy(&pebs_state.records_lock);
+      return -1;
+    }
+
+    /* Write sampling (memory stores) */
+    if (setup_perf_event(PEBS_EVENT_MEM_STORES, 0, 1,
+                         c, &pebs_state.perf_fd[PEBS_SAMPLE_WRITE][c],
+                         &pebs_state.perf_page[PEBS_SAMPLE_WRITE][c]) < 0) {
+      TM_ERROR("Failed to setup PEBS stores on cpu %d", c);
+      pebs_close_all_events();
+      pthread_rwlock_destroy(&pebs_state.records_lock);
+      return -1;
+    }
   }
 
   pebs_state.initialized = true;
@@ -384,17 +416,8 @@ void pebs_shutdown(void) {
 
   pebs_stop();
 
-  /* Cleanup perf resources */
-  for (int i = 0; i < PEBS_SAMPLE_TYPE_COUNT; i++) {
-    if (pebs_state.perf_page[i] != NULL) {
-      munmap(pebs_state.perf_page[i], pebs_state.mmap_size);
-      pebs_state.perf_page[i] = NULL;
-    }
-    if (pebs_state.perf_fd[i] > 0) {
-      close(pebs_state.perf_fd[i]);
-      pebs_state.perf_fd[i] = 0;
-    }
-  }
+  /* Cleanup perf resources (all per-CPU events) */
+  pebs_close_all_events();
 
   pebs_clear_records();
   pthread_rwlock_destroy(&pebs_state.records_lock);
@@ -417,9 +440,12 @@ int pebs_start(void) {
 
   /* Enable perf events */
   for (int i = 0; i < PEBS_SAMPLE_TYPE_COUNT; i++) {
-    if (ioctl(pebs_state.perf_fd[i], PERF_EVENT_IOC_ENABLE, 0) < 0) {
-      TM_ERROR("Failed to enable perf event %d: %s", i, strerror(errno));
-      return -1;
+    for (int c = 0; c < pebs_state.ncpus; c++) {
+      if (ioctl(pebs_state.perf_fd[i][c], PERF_EVENT_IOC_ENABLE, 0) < 0) {
+        TM_ERROR("Failed to enable perf event %d cpu %d: %s", i, c,
+                 strerror(errno));
+        return -1;
+      }
     }
   }
 
@@ -450,7 +476,9 @@ void pebs_stop(void) {
 
   /* Disable perf events */
   for (int i = 0; i < PEBS_SAMPLE_TYPE_COUNT; i++) {
-    ioctl(pebs_state.perf_fd[i], PERF_EVENT_IOC_DISABLE, 0);
+    for (int c = 0; c < pebs_state.ncpus; c++) {
+      ioctl(pebs_state.perf_fd[i][c], PERF_EVENT_IOC_DISABLE, 0);
+    }
   }
 
   pebs_state.running = false;

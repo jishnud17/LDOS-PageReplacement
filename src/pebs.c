@@ -12,6 +12,7 @@
 #define _GNU_SOURCE
 #include <asm/unistd.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <linux/hw_breakpoint.h>
 #include <linux/perf_event.h>
 #include <pthread.h>

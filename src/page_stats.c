@@ -536,10 +536,21 @@ static void sig_compute_recency_weighted(page_signals_t *s, const double *v, int
  * the implied interval 1000/rate (ms) of each bar that saw activity. */
 static void sig_compute_inter_access(page_stats_t *stats, const double *v, int n) {
     page_signals_t *s = &stats->sig;
-    uint64_t ac = atomic_load(&stats->access_count);
-    uint64_t span_ns = atomic_load(&stats->last_access_ns) - stats->first_access_ns;
-    uint64_t gaps = (ac > 1) ? (ac - 1) : 1;
-    s->inter_access_interval_ms = (double)span_ns / 1e6 / (double)gaps;
+
+    /* Prefer the hardware-timestamped PEBS gap EWMA when available: it is a
+     * recent-window measurement of true inter-sample spacing (proportional
+     * to the inter-access interval), whereas the legacy computation below
+     * is a lifetime average whose endpoints are quantized to the merge
+     * cadence in telemetry mode -- that quantization is what killed this
+     * signal's phase-1 leading behavior in the validation round. */
+    if (stats->pebs_gap_ewma_ms > 0.0) {
+        s->inter_access_interval_ms = stats->pebs_gap_ewma_ms;
+    } else {
+        uint64_t ac = atomic_load(&stats->access_count);
+        uint64_t span_ns = atomic_load(&stats->last_access_ns) - stats->first_access_ns;
+        uint64_t gaps = (ac > 1) ? (ac - 1) : 1;
+        s->inter_access_interval_ms = (double)span_ns / 1e6 / (double)gaps;
+    }
 
     /* Variance of implied per-bar intervals (ms) across active bars. */
     double sum = 0.0, sumsq = 0.0; int cnt = 0;

@@ -157,6 +157,13 @@ typedef struct page_stats {
     /* Derived features (computed by policy thread) */
     double heat_score;              /* Hotness estimate [0.0, 1.0] */
     double access_rate;             /* Accesses per second */
+
+    /* EWMA of gaps between PEBS samples of this page (ms), from hardware
+     * sample timestamps; written by pebs_merge_with_page_stats.  0 until
+     * the page has >= 2 samples.  Preferred input for the inter-access
+     * signal (proportional to true inter-access interval; constant factor
+     * ~ sampling period). */
+    double pebs_gap_ewma_ms;
     
     /* Placement state */
     memory_tier_t current_tier;

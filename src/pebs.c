@@ -42,6 +42,7 @@ struct perf_sample {
   struct perf_event_header header;
   __u64 ip;       /* Instruction pointer */
   __u32 pid, tid; /* Process/thread ID */
+  __u64 time;     /* Hardware sample timestamp (PERF_SAMPLE_TIME) */
   __u64 addr;     /* Virtual address accessed */
   __u64 weight;   /* Access latency (cycles) */
 };
@@ -178,8 +179,8 @@ static int setup_perf_event(__u64 config, __u64 config1, int precise, int cpu,
   attr.config = config;
   attr.config1 = config1;
   attr.sample_period = PEBS_SAMPLE_PERIOD;
-  attr.sample_type =
-      PERF_SAMPLE_IP | PERF_SAMPLE_TID | PERF_SAMPLE_WEIGHT | PERF_SAMPLE_ADDR;
+  attr.sample_type = PERF_SAMPLE_IP | PERF_SAMPLE_TID | PERF_SAMPLE_TIME |
+                     PERF_SAMPLE_WEIGHT | PERF_SAMPLE_ADDR;
   attr.disabled = 1; /* Start disabled */
   attr.inherit = 1;  /* Sample threads created after open (pthread/OpenMP
                       * workers), not just the opening thread.  Inherited
@@ -262,6 +263,24 @@ static void process_sample(struct perf_sample *ps, pebs_sample_type_t type) {
 
   __sync_fetch_and_add(&rec->total_latency, ps->weight);
   rec->last_sample_ns = get_time_ns();
+
+  /* Inter-sample gap EWMA from hardware timestamps.  The collector is the
+   * only writer (single thread drains all per-CPU buffers), so plain
+   * updates are safe.  Buffers are drained per-CPU in sequence, so a
+   * page's samples can arrive slightly out of order across CPUs -- skip
+   * the (rare) backward gaps rather than pollute the average. */
+  if (ps->time > 0) {
+    if (rec->last_sample_time_ns > 0 && ps->time > rec->last_sample_time_ns) {
+      double gap = (double)(ps->time - rec->last_sample_time_ns);
+      const double alpha = 0.3; /* recent-weighted, ~last 5-10 samples */
+      rec->gap_ewma_ns = (rec->gap_ewma_ns > 0.0)
+                             ? alpha * gap + (1.0 - alpha) * rec->gap_ewma_ns
+                             : gap;
+      rec->last_sample_time_ns = ps->time;
+    } else if (ps->time > rec->last_sample_time_ns) {
+      rec->last_sample_time_ns = ps->time; /* first sample: no gap yet */
+    }
+  }
 
   atomic_fetch_add(&pebs_state.total_samples, 1);
 }
@@ -674,6 +693,12 @@ void pebs_merge_with_page_stats(void) {
         /* Update last access time if PEBS saw more recent activity */
         if (rec->last_sample_ns > atomic_load(&stats->last_access_ns)) {
           atomic_store(&stats->last_access_ns, rec->last_sample_ns);
+        }
+
+        /* Hardware-timestamped inter-sample gap (ms) for the inter-access
+         * signal; supersedes the quantized lifetime span/count estimate. */
+        if (rec->gap_ewma_ns > 0.0) {
+          stats->pebs_gap_ewma_ms = rec->gap_ewma_ns / 1e6;
         }
       }
       rec = rec->next;

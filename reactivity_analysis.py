@@ -177,7 +177,7 @@ def event_triggered(df, events, signal_cols, W, zmean, zstd):
     return by_type
 
 
-def score(mean_traj, mat, W):
+def score(mean_traj, mat, W, step_ms=STEP_MS):
     """amplitude (std units), consistency (dir agreement), lead/lag (ms)."""
     pre = mean_traj[:W]
     baseline = np.nanmean(pre) if len(pre) else 0.0
@@ -194,8 +194,22 @@ def score(mean_traj, mat, W):
     half = 0.5 * amplitude
     crossings = np.where(np.abs(dev) >= half)[0]
     onset = crossings[0] if len(crossings) else peak
-    lead_lag_ms = (onset - W) * STEP_MS
+    lead_lag_ms = (onset - W) * step_ms
     return amplitude, agree, lead_lag_ms, peak
+
+
+def measure_cadence(df):
+    """
+    Measure the ACTUAL bar spacing from row timestamps.  Bars are nominally
+    STEP_MS apart, but an overloaded policy thread (too many tracked pages)
+    stretches them -- which silently invalidates fast-vs-slow signal rankings
+    (every signal fires on the same coarse bar).  This happened on the first
+    GUPS runs (~30x stretch); never trust a ranking without this check.
+    """
+    dt = df.groupby("page_addr", sort=False)["timestamp_ns"].diff().dropna()
+    if len(dt) == 0:
+        return float(STEP_MS)
+    return float(dt.median()) / 1e6
 
 
 def analyze_file(path, args, accum):
@@ -207,6 +221,15 @@ def analyze_file(path, args, accum):
     events = detect_events(df, args.hot_frac, args.smooth, args.min_hot, args.debounce)
     counts = pd.Series([t for _, t in events]).value_counts().to_dict()
     print(f"\n{'='*70}\n{name}  ({len(df):,} rows, {df['page_addr'].nunique()} pages)")
+
+    step_ms = measure_cadence(df)
+    stretch = step_ms / STEP_MS
+    print(f"bar cadence: measured {step_ms:.0f} ms/bar (nominal {STEP_MS} ms)")
+    if stretch > 1.5:
+        print(f"  *** WARNING: cadence stretched {stretch:.1f}x -- the policy thread")
+        print(f"  *** could not hold {STEP_MS}ms.  Fast-vs-slow signal rankings on")
+        print(f"  *** this dataset are NOT trustworthy; lead/lag uses measured bars.")
+
     print(f"events detected: {counts if counts else 'none'}")
     if not events:
         print("  no events -- try lowering --hot-frac or --min-hot")
@@ -218,10 +241,10 @@ def analyze_file(path, args, accum):
     for et, (nev, sig) in by_type.items():
         rows = []
         for c, (mean_traj, mat) in sig.items():
-            amp, agree, lead, peak = score(mean_traj, mat, args.window)
+            amp, agree, lead, peak = score(mean_traj, mat, args.window, step_ms)
             rows.append((c, amp, agree, lead, amp * agree))
             for k, v in enumerate(mean_traj):
-                traj_rows.append((et, c, (k - args.window) * STEP_MS, v))
+                traj_rows.append((et, c, (k - args.window) * step_ms, v))
         rank = pd.DataFrame(rows, columns=["signal", "amplitude",
                                            "consistency", "lead_lag_ms", "score"])
         rank = rank.sort_values("score", ascending=False).reset_index(drop=True)
@@ -231,7 +254,7 @@ def analyze_file(path, args, accum):
 
         # terminal view: top signals for this event type
         print(f"\n  --- {et}  (n={nev}) ---  [lead<0 = reacts early]")
-        print(f"  {'signal':<24}{'ampl':>6}{'consist':>9}{'lead_ms':>9}  trajectory(-{args.window*STEP_MS}..+{args.window*STEP_MS}ms)")
+        print(f"  {'signal':<24}{'ampl':>6}{'consist':>9}{'lead_ms':>9}  trajectory(-{args.window*step_ms:.0f}..+{args.window*step_ms:.0f}ms)")
         for _, r in rank.head(args.top).iterrows():
             mt = sig[r["signal"]][0]
             print(f"  {r['signal']:<24}{r['amplitude']:>6.2f}{r['consistency']:>9.2f}"
@@ -256,7 +279,7 @@ def analyze_file(path, args, accum):
             nrow = int(np.ceil(len(order) / ncol))
             fig, axes = plt.subplots(nrow, ncol, figsize=(3 * ncol, 2 * nrow),
                                      squeeze=False)
-            t = (np.arange(2 * args.window + 1) - args.window) * STEP_MS
+            t = (np.arange(2 * args.window + 1) - args.window) * step_ms
             for ax, c in zip(axes.flat, order):
                 ax.plot(t, sig[c][0])
                 ax.axvline(0, color="r", lw=0.8, ls="--")

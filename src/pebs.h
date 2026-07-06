@@ -62,7 +62,19 @@ typedef struct pebs_page_record {
   uint64_t read_samples;   /* Number of read samples */
   uint64_t write_samples;  /* Number of write samples */
   uint64_t total_latency;  /* Sum of access latencies (from PEBS weight) */
-  uint64_t last_sample_ns; /* Timestamp of most recent sample */
+  uint64_t last_sample_ns; /* Drain-time timestamp of most recent sample */
+
+  /* Inter-access gap tracking from HARDWARE sample timestamps
+   * (PERF_SAMPLE_TIME).  gap_ewma_ns is an exponential moving average of
+   * the time between consecutive samples of this page.  Because samples
+   * occur every ~PEBS_SAMPLE_PERIOD accesses, this is the true inter-access
+   * interval scaled by a constant factor -- which z-scored reactivity
+   * analysis is insensitive to.  Restores the leading inter-access signal
+   * in telemetry mode (the previous lifetime span/count computation was
+   * destroyed by 10ms merge quantization). */
+  uint64_t last_sample_time_ns; /* hardware timestamp of previous sample */
+  double gap_ewma_ns;           /* EWMA of inter-sample gaps */
+
   struct pebs_page_record *next; /* Hash chain */
 } pebs_page_record_t;
 

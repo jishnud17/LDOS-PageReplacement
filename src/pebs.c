@@ -225,23 +225,54 @@ static void process_sample(struct perf_sample *ps, pebs_sample_type_t type) {
   atomic_fetch_add(&pebs_state.total_samples, 1);
 }
 
+/*
+ * Copy `len` bytes starting at ring offset `off`, handling wrap-around.
+ * The perf ring buffer is circular: a record whose start is within
+ * sizeof(record) bytes of the top continues at the bottom.  Reading fields
+ * in place past the end of the mapping is a segfault (observed on the
+ * twitter run: fault at mapping_end+0x8 dereferencing sample->addr).
+ */
+static void ring_copy(void *dst, const char *pbuf, uint64_t size,
+                      uint64_t off, size_t len) {
+  if (off + len <= size) {
+    memcpy(dst, pbuf + off, len);
+  } else {
+    size_t first = (size_t)(size - off);
+    memcpy(dst, pbuf + off, first);
+    memcpy((char *)dst + first, pbuf, len - first);
+  }
+}
+
 static void drain_buffer(pebs_sample_type_t type) {
   struct perf_event_mmap_page *p = pebs_state.perf_page[type];
   if (p == NULL)
     return;
 
   char *pbuf = (char *)p + p->data_offset;
+  uint64_t size = p->data_size;
 
-  __sync_synchronize();
+  uint64_t head = p->data_head;
+  __sync_synchronize(); /* rmb: read data_head before reading record bytes */
+  uint64_t tail = p->data_tail;
 
-  while (p->data_head != p->data_tail) {
-    struct perf_event_header *hdr =
-        (void *)(pbuf + (p->data_tail % p->data_size));
+  while (tail != head) {
+    uint64_t off = tail % size;
 
-    switch (hdr->type) {
-    case PERF_RECORD_SAMPLE:
-      process_sample((struct perf_sample *)hdr, type);
+    struct perf_event_header hdr;
+    ring_copy(&hdr, pbuf, size, off, sizeof(hdr));
+
+    if (hdr.size == 0) /* corrupt record; stop rather than spin forever */
       break;
+
+    switch (hdr.type) {
+    case PERF_RECORD_SAMPLE: {
+      struct perf_sample sample;
+      size_t want = hdr.size < sizeof(sample) ? hdr.size : sizeof(sample);
+      ring_copy(&sample, pbuf, size, off, want);
+      if (want >= sizeof(sample))
+        process_sample(&sample, type);
+      break;
+    }
 
     case PERF_RECORD_THROTTLE:
     case PERF_RECORD_UNTHROTTLE:
@@ -253,8 +284,11 @@ static void drain_buffer(pebs_sample_type_t type) {
       break;
     }
 
-    p->data_tail += hdr->size;
+    tail += hdr.size;
   }
+
+  __sync_synchronize(); /* finish reading records before releasing space */
+  p->data_tail = tail;
 }
 
 static void *collector_thread_fn(void *arg) {

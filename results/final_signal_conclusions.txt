@@ -17,6 +17,10 @@ Inputs:
 Score = amplitude x consistency of the event-triggered average around
 hot<->cold transitions.
 
+Group sizes are merit-driven, not fixed: a group contains however many
+signals the evidence actually supports, so the GOOD group differs in size
+across the three rankings.
+
 ================================================================================
 SIGNAL GLOSSARY (what each of the 19 signals measures)
 ================================================================================
@@ -71,18 +75,19 @@ RANKING A: SYNTHETIC EVIDENCE (phase-1 + telemetry control; clean 50ms bars)
 Basis: scores on the three phase-1 workloads and the control rerun -- the
 datasets where the signal clock held its designed 50ms cadence.
 
-  GOOD
+  GOOD  (only two signals were top-tier across BOTH fine-clock datasets)
    1. RANDOM WALK INDEX        #1 in all 3 P1 workloads (1.1-7.0); CTL top-5
                                both events, rwi_low #1 hot_to_cold (1.64/0.96)
    2. SWING INDEX              P1 top-3 everywhere; CTL #1 cold_to_hot
                                (2.20 sigma at 0.88)
-   3. RAVI                     CTL #2 hot_to_cold (1.57/0.96); mid in P1
-   4. PARABOLIC SAR            reliable coincident direction flag in P1+CTL
-                               (0.75-1.11)
-   5. SCHAFF TREND CYCLE       consistent in P1 (0.74-0.93) and CTL (0.95)
-                               but ALWAYS +50-150ms late -- confirmation only
 
   POTENTIAL SUPPLEMENTARY
+   3. RAVI                     CTL #2 hot_to_cold (1.57/0.96) but only mid in
+                               P1 -- one strong dataset, not two
+   4. PARABOLIC SAR            reliable coincident direction flag in P1+CTL
+                               (0.75-1.11), never top-tier
+   5. SCHAFF TREND CYCLE       consistent in P1 (0.74-0.93) and CTL (0.95)
+                               but ALWAYS +50-150ms late -- confirmation only
    6. INTER-ACCESS INTERVAL    the only signal that ever LED transitions
                                (P1: -100 to -250ms, score to 3.2) -- but only
                                under P1's per-access fault timestamps; dead
@@ -116,7 +121,7 @@ stretched clock favors slow smoothed signals (transitions become single-bar
 cliffs); this is the ranking of record for "fires on a real workload's
 transitions," not "reacts fastest."
 
-  GOOD
+  GOOD  (gate: avg score >= 4 AND consistency >= 0.83 -- six signals passed)
    1. LINEAR REGRESSION        slope 28.9 sigma cold_to_hot (0.94), 0.90
                                hot_to_cold -- highest avg score (14.3)
    2. SUPERTREND               20.1 / 5.8 at 0.89-0.93 (band; the direction
@@ -159,25 +164,31 @@ are what the system must serve), consistency weighted above raw amplitude,
 with Ranking A used to (a) flag which Group-1 placements depend on the
 coarse clock and (b) settle ties.  Where A and B disagree, the entry says so.
 
-  GOOD
+  GOOD  (three signals: strong on the real workload WITHOUT the placement
+         resting solely on the coarse-clock artifact)
    1. ADX                      only signal with perfect consistency on both
-                               real event types; erratic at fine clock --
-                               verify in the 50ms rerun
-   2. LINEAR REGRESSION        top real-workload score; dead at fine clock --
-                               the placement most dependent on the coarse bar
-   3. SUPERTREND               strong real numbers; weaker twin of PSAR at
-                               fine clock
-   4. ICHIMOKU                 strong real numbers; dead at fine clock
-   5. RECENCY-WEIGHTED FREQ    good on real AND decent on control -- the most
-                               cadence-robust of the smoothed family
-   6. RANDOM WALK INDEX        the only signal top-tier under BOTH clocks
+                               real event types (9.6 sigma at 1.00/1.00);
+                               erratic at fine clock -- verify in 50ms rerun
+   2. RANDOM WALK INDEX        the only signal top-tier under BOTH clocks
                                (P1 #1 everywhere, CTL top-5, GUPS 1.00
                                consistency) -- the safest pick on this list
+   3. RECENCY-WEIGHTED FREQ    good on real (13.7/4.5 at 0.89-0.93) AND
+                               decent on control (0.93 at 0.98) -- the most
+                               cadence-robust of the smoothed family
 
   POTENTIAL SUPPLEMENTARY
+   4. LINEAR REGRESSION        top real-workload score (avg 14.3) but dead at
+                               fine clock -- the placement most dependent on
+                               the coarse bar; promote only if the 50ms rerun
+                               confirms it
+   5. SUPERTREND               strong real numbers (13.0 avg at 0.89-0.93);
+                               weaker twin of PSAR at fine clock -- same
+                               verify-at-50ms condition
+   6. ICHIMOKU                 strong real numbers (~10 avg); dead at fine
+                               clock -- same condition
    7. AROON                    real signal, inconsistent direction
    8. ACCUM SWING INDEX        solid everywhere, duplicates swing_index
-   9. SWING INDEX              mid on real, Group-1-grade on control --
+   9. SWING INDEX              mid on real, GOOD-grade on the control --
                                expected to rise after the cadence fix
   10. RAVI                     same profile as swing: mid real, strong control
   11. PARABOLIC SAR            direction feature at fine clock; band-only at
@@ -204,12 +215,18 @@ coarse clock and (b) settle ties.  Where A and B disagree, the entry says so.
 FEATURE LIST FOR PHASE-2 (from Ranking C)
 ================================================================================
 
-  From GOOD:      avg_directional_index, linear_reg_slope, supertrend,
-                  ichimoku_tenkan, recency_weighted_frequency,
-                  random_walk_index_high (+ _low)
-  Watch items:    swing_index, range_action_verification_index (Group-1-
-                  grade on the clean-cadence control; expected to rise when
-                  the real-workload rerun holds 50ms)
+  From GOOD:      avg_directional_index, random_walk_index_high (+ _low),
+                  recency_weighted_frequency
+
+  Pending 50ms verification (strong real-workload numbers that currently
+  rest on the coarse clock -- promote if the bounded-tracking rerun
+  confirms them):
+                  linear_reg_slope, supertrend, ichimoku_tenkan
+
+  Watch items:    swing_index, range_action_verification_index (GOOD-grade
+                  on the clean-cadence control; expected to rise when the
+                  real-workload rerun holds 50ms)
+
   Conditional:    inter_access_interval_ms (pending per-sample timestamps;
                   potentially the only LEADING feature)
 

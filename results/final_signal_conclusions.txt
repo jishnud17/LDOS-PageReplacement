@@ -75,23 +75,28 @@ RANKING A: SYNTHETIC EVIDENCE (phase-1 + telemetry control; clean 50ms bars)
 Basis: scores on the three phase-1 workloads and the control rerun -- the
 datasets where the signal clock held its designed 50ms cadence.
 
-  GOOD  (only two signals were top-tier across BOTH fine-clock datasets)
+  GOOD
    1. RANDOM WALK INDEX        #1 in all 3 P1 workloads (1.1-7.0); CTL top-5
                                both events, rwi_low #1 hot_to_cold (1.64/0.96)
    2. SWING INDEX              P1 top-3 everywhere; CTL #1 cold_to_hot
                                (2.20 sigma at 0.88)
+   3. INTER-ACCESS INTERVAL    the only signal that ever LED transitions --
+                               P1 cold_to_hot lead of -100 to -250ms, score
+                               to 3.2 on temporal; uniquely predictive.
+                               NOTE: its zero in CTL is not counted against
+                               it here -- the telemetry collection mode
+                               cannot measure this signal by construction
+                               (no per-access timestamps).  Its GOOD standing
+                               is conditional on a timestamp-bearing
+                               collection path.
 
   POTENTIAL SUPPLEMENTARY
-   3. RAVI                     CTL #2 hot_to_cold (1.57/0.96) but only mid in
+   4. RAVI                     CTL #2 hot_to_cold (1.57/0.96) but only mid in
                                P1 -- one strong dataset, not two
-   4. PARABOLIC SAR            reliable coincident direction flag in P1+CTL
+   5. PARABOLIC SAR            reliable coincident direction flag in P1+CTL
                                (0.75-1.11), never top-tier
-   5. SCHAFF TREND CYCLE       consistent in P1 (0.74-0.93) and CTL (0.95)
+   6. SCHAFF TREND CYCLE       consistent in P1 (0.74-0.93) and CTL (0.95)
                                but ALWAYS +50-150ms late -- confirmation only
-   6. INTER-ACCESS INTERVAL    the only signal that ever LED transitions
-                               (P1: -100 to -250ms, score to 3.2) -- but only
-                               under P1's per-access fault timestamps; dead
-                               in CTL (0.01).  Conditional on timestamping.
    7. ACCUM SWING INDEX        good numbers (CTL 1.09/1.00) but duplicates #2
    8. DIRECTIONAL INDICATORS   minus_di best demotion detector after the top
                                family in P1 (0.40-1.43); weak in CTL

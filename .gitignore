@@ -5,8 +5,12 @@ lib/
 *.o
 *.so
 
-# ML data output
-ml_dataset.csv
+# ML data output: raw CSVs are transient (runs write them here; local
+# analysis gunzips them from the tracked .gz archives). Only .gz is tracked.
+/ml_dataset.csv
+/ml_dataset_*.csv
+data/**/ml_dataset_*.csv
+tot_gups.txt
 
 # Editor / OS junk
 .DS_Store

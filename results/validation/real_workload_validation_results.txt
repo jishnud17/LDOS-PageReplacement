@@ -1,0 +1,280 @@
+================================================================================
+REAL-WORKLOAD VALIDATION RESULTS -- PHASE 1.5
+LDOS PageReplacement -- heuristics-analysis branch
+Generated: 2026-07-06
+================================================================================
+
+SIGNAL GLOSSARY (what each metric measures, in access-rate terms)
+-----------------------------------------------------------------
+Every signal is computed per page over a rolling window of access-rate bars
+(one bar per 50ms sampling interval).
+
+  random_walk_index_high   Compares how far the access rate actually moved
+                           over N bars vs. what a random walk would produce.
+                           High value = the rate is trending, not noise.
+  random_walk_index_low    Same, over a shorter lookback; catches shorter
+                           trends.
+  swing_index              Size of the current bar's rate move relative to
+                           the bar's total range; "how decisive was this step."
+  accum_swing_index        Running cumulative sum of swing_index.
+  schaff_trend_cycle       Cycle detector built on double-smoothed moving
+                           averages; 0-100 oscillator, extremes = trend
+                           established.  Confirms trends; inherently lags.
+  parabolic_sar            Trailing stop level that accelerates as a trend
+                           extends (raw level).
+  parabolic_sar_direction  +1/-1 flag: which side of the SAR the rate is on;
+                           flips when the trend reverses.
+  range_action_verification_index (RAVI)
+                           Short-period moving average vs. long-period moving
+                           average, as a percent difference; momentum vs trend.
+  avg_directional_index    Trend strength regardless of direction (smoothed
+                           |+DI - -DI| / (+DI + -DI)).
+  interval_access_rate     The raw per-bar access rate itself (accesses/sec
+                           measured in the last bar).  Not an indicator --
+                           the underlying series.
+  inter_access_interval_ms Mean time gap between consecutive accesses to the
+                           page.  Shrinks before a page heats up -- phase-1's
+                           only LEADING signal.
+  system_quality_number    Mean rate-change divided by std of rate-changes;
+                           trend quality.
+  ichimoku_* family        Moving-average midpoints over 9/26/52-bar windows
+                           (tenkan/kijun/senkou_a/senkou_b/chikou).  NOTE:
+                           ichimoku_chikou duplicates interval_access_rate in
+                           our implementation (known artifact) -- excluded
+                           from rankings.
+  linear_reg_slope/intercept  Least-squares line fit over the lookback window.
+  recency_weighted_frequency  Access rate with exponential decay favoring
+                           recent accesses.
+
+WHAT WAS RUN
+------------
+All real workloads come from the mentor-provided repositories:
+
+  1. GUPS (gups_hemem, from SujayYadalam94/workloads) -- the HeMem benchmark.
+     Two variants run under the tiered-memory manager in telemetry mode:
+       - gups-hotset-move : 90/10 skewed updates, hot set relocates mid-run
+                            (2GB table, 128 hot pages, move at t=15s, 35s run)
+       - gups-skewed      : static 90/10 hot set (run came out too short --
+                            see LIMITATIONS)
+
+  2. GAPBS PageRank on the Twitter graph (gapbs + memtis gen-twitter diff).
+     Built, integrated, and executed end-to-end; blocked from producing load
+     telemetry by a hardware defect on the CloudLab node family (see PEBS
+     HARDWARE FINDING).  Queued for a Skylake-class node.
+
+  3. Control: the phase-1 synthetic hot_cold workload re-run under the SAME
+     collection method as the real workloads (PEBS telemetry-only mode).
+     This isolates "did the measurement change?" from "did the workload
+     change?" -- without it, any ranking difference between phase-1 and the
+     real workloads would be confounded.
+
+COLLECTION METHOD (what changed vs phase-1)
+-------------------------------------------
+Phase-1 used full management: userfaultfd demand paging + write-protect
+fault counting + PEBS, on synthetic workloads compiled into the manager.
+
+Real applications cannot pay the demand-paging cost (measured 2500x slowdown
+on first touch), so real workloads run in TELEMETRY-ONLY mode:
+  - LD_PRELOAD shim intercepts the application's large allocations
+  - pages fault natively at full speed (zero measurable overhead:
+    GUPS throughput identical with and without the manager attached)
+  - access data comes exclusively from PEBS hardware sampling
+  - per-CPU perf events with inheritance sample ALL application threads
+  - no migrations occur (telemetry, not policy, is being evaluated)
+
+================================================================================
+RESULT 1: THE PHASE-1 SIGNAL HIERARCHY REPLICATES UNDER THE
+          REAL-WORKLOAD COLLECTION METHOD  (control run)
+================================================================================
+
+hot_cold synthetic, telemetry mode: 410 hot pages tracked, 52K rows,
+413 hot_to_cold events, 17 cold_to_hot events (warm/cold tiers are read-only
+and invisible on this node -- see PEBS HARDWARE FINDING).
+
+  Phase-1 finding                        Telemetry control result
+  -------------------------------------  --------------------------------------
+  random_walk_index_high (trend-vs-      HOLDS: amp 1.12-1.67, consist
+    noise detector) top reactive           0.88-1.00
+  swing_index (per-bar move size)        HOLDS: top cold_to_hot signal (2.20)
+  accum_swing_index (its running sum)    HOLDS: 1.09 amp at consist 1.00
+  schaff_trend_cycle (cycle detector)    HOLDS: still reacts but LAGS
+    reacts but lags                        (+50 to +150 ms, consist 0.82-0.95)
+  parabolic_sar/direction (trend-flip    HOLDS: 0.75-1.00 amp, coincident
+    flag) fires on transitions
+  Ichimoku family (slow moving           HOLDS: near-zero again
+    averages) near-zero
+  system_quality_number (trend quality   DOES NOT HOLD: amp collapsed to ~0.03.
+    = mean/std of rate changes) top-3    PEBS-estimated rates move in 5003-
+                                         sized quanta, inflating the std term.
+                                         Artifact-sensitive signal.
+  inter_access_interval_ms (mean gap     DOES NOT HOLD -- BY CONSTRUCTION.
+    between accesses) LEADS transitions  See RESULT 3.
+
+  Top hot_to_cold signals (n=413):
+    signal (what it measures)                     ampl   consist  lead_ms
+    random_walk_index_low (short-window trend)    1.71    0.96      +50
+    range_action_verification_index
+      (short-MA vs long-MA momentum)              1.63    0.96      +150
+    interval_access_rate (the raw rate itself)    1.51    1.00        0
+    random_walk_index_high (long-window trend)    1.12    1.00        0
+    accum_swing_index (cumulative move size)      1.09    1.00        0
+    parabolic_sar (trailing trend level)          1.24    0.81        0
+    schaff_trend_cycle (cycle detector)           1.01    0.95      +50 (lags)
+
+  Top cold_to_hot signals (n=17, small sample):
+    swing_index (per-bar move size)               2.20    0.88     -100
+    random_walk_index_high (long-window trend)    1.67    0.88     -200
+    schaff_trend_cycle (cycle detector)           0.99    0.82     +100 (lags)
+
+TAKEAWAY: the core phase-1 conclusion -- the random-walk/swing-index
+volatility family is the most reactive and consistent signal group, with
+the Schaff Trend Cycle as a lagging confirmer -- survives the change of
+collection method.  Ranking differences between phase-1 and real workloads
+can therefore be attributed to the workloads, not the measurement.
+
+================================================================================
+RESULT 2: END-TO-END VALIDATION ON A REAL TIERED-MEMORY BENCHMARK
+          (GUPS hotset-move)
+================================================================================
+
+2.49M rows, 159K pages observed, 83 hot_to_cold + 52 cold_to_hot events
+detected from a REAL hot-set migration (the benchmark relocates its hot
+region mid-run; the pipeline captured the transition).
+
+  - Reactions are enormous and near-unanimous: 5-32 sigma amplitudes at
+    0.89-1.00 consistency across events.
+  - random_walk_index_high (trend-vs-noise detector): 7.3 sigma, consistency
+    1.00, coincident -- the phase-1 top signal fires perfectly on a real
+    workload's transitions.
+  - avg_directional_index (direction-free trend strength): 9.6 sigma at
+    consistency 1.00 on both event types.
+
+IMPORTANT CAVEAT -- signal RANKING on this dataset is not comparable to
+phase-1: the raw rate and slow smoothers (Ichimoku moving averages, linear
+regression fits) rank at the top here, inverting phase-1.  Cause: the run
+tracked 159K pages (GUPS's 10% uniform traffic touches the whole 2GB table),
+which stretched the policy thread's 50ms signal cadence to ~1.5s per bar.
+At 1.5s resolution, GUPS's transitions are single-bar cliffs -- every signal
+fires on the same bar, and amplitude ordering reflects normalization rather
+than reaction speed.  Fast-vs-slow signal discrimination requires holding
+the 50ms cadence, which requires bounding the tracked-page count (an
+identified, straightforward engineering fix: cold-page thinning).
+
+TAKEAWAY: the telemetry pipeline works end-to-end on a real benchmark and
+detects real transitions with the expected signals responding.  Clean
+real-workload signal RANKINGS require the cadence fix first.
+
+================================================================================
+RESULT 3: THE LEADING SIGNAL REQUIRES PER-ACCESS TIMESTAMPS
+          (methods finding)
+================================================================================
+
+Phase-1's most interesting signal -- inter_access_interval_ms, the mean time
+gap between consecutive accesses to a page, and the only signal that LED
+cold_to_hot transitions (by 100-250ms) -- collapsed in every telemetry-mode
+dataset (amplitudes 0.01-0.35 vs phase-1 scores up to 3.2).
+
+This is not a workload effect; it is a measurement-granularity effect.  In
+phase-1, userfaultfd write-protect faults gave a truthful timestamp for
+each access, and the interval signal measured real gaps between accesses.
+In telemetry mode, access times are quantized to the 10ms PEBS merge
+cadence, destroying the fine-grained gap structure the signal depends on.
+
+IMPLICATION FOR PHASE-2: the predictive-lead property discovered in phase-1
+is real but conditional on the tracking mechanism.  A deployed system that
+wants the early-warning signal must either retain a UFFD-style per-access
+timestamp path for candidate pages, or timestamp PEBS samples individually
+at ingest (feasible: perf records carry timestamps; currently discarded at
+merge).  The second option is the natural phase-2 engineering item.
+
+================================================================================
+PEBS HARDWARE FINDING (affects platform requirements)
+================================================================================
+
+On the CloudLab c220g2/g5 (Haswell-generation) nodes, PEBS LOAD sampling
+counts events correctly but reports a garbage constant data address
+(0xfeb8xxxx) for virtually all load samples.  STORE address capture is
+correct.  Verified independently with stock `perf mem` (kernel reference
+tooling, our code not involved): the same garbage data symbols dominate its
+output.  Cross-checked against three event encodings (MEM_UOPS_RETIRED.
+ALL_LOADS, the load-latency facility 0x1CD, and perf mem's own config).
+
+Consequences:
+  - All telemetry on this node family is store-driven.  Write-bearing
+    workloads (GUPS updates, synthetic hot pages) attribute perfectly;
+    read-only regions (PageRank's graph arrays) are invisible.
+  - Phase-1 was immune by accident: its synthetic workloads write every
+    hot page (1 write per 8 reads), so store samples carried the signal.
+  - GAPBS PageRank/Twitter (mentor-provided) is integrated and runs
+    end-to-end but needs a Skylake-class node (e.g. CloudLab c6420) for
+    load telemetry -- the same hardware class MEMTIS and HeMem target.
+
+Two secondary attribution effects were found and fixed along the way:
+  - A dense single-address store stream (a debug sink variable written
+    every loop iteration) absorbed store-sample attribution from
+    neighboring region stores (612K samples -> 64 pages before the fix;
+    410/410 hot pages after).  Lesson: PEBS attribution is sensitive to
+    interleaved high-frequency store streams.
+  - Transparent Huge Pages were ruled out as a cause by direct experiment
+    (THP=never changed nothing).
+
+================================================================================
+LIMITATIONS (stated plainly)
+================================================================================
+
+1. gups-skewed produced too few signal bars (the concentrated hot set made
+   the fixed update count finish in 3s; series shorter than the event
+   detector's minimum).  Rerun with a larger update count when node time
+   permits.  gups-hotset-move covers the same access pattern plus the
+   transition, so the loss is redundancy, not coverage.
+
+2. GUPS ranking comparability is limited by the bar-cadence stretch
+   (RESULT 2).  Fixing it is engineering, not research risk.
+
+3. cold_to_hot event counts are small in telemetry mode (n=17-18): pages
+   with no write activity produce no samples, so pages first appear in the
+   data near their warm-up.  Store-side limitation of this node family.
+
+4. Single run per configuration; no replication yet.
+
+================================================================================
+UPDATED PHASE-2 FEATURE SHORTLIST
+================================================================================
+
+  KEEP (validated across method change and/or real workload):
+    random_walk_index_high   (trend-vs-noise detector) -- top or near-top
+                             everywhere, consistency ~1.0
+    swing_index              (per-bar move size) -- top cold_to_hot in
+                             control (2.20 sigma)
+    schaff_trend_cycle       (cycle detector) -- consistent lagging
+                             confirmer everywhere
+    parabolic_sar_direction  (trend-flip flag) -- cheap direction feature,
+                             held up
+    random_walk_index_low    (short-window trend) and
+    range_action_verification_index (short-vs-long MA momentum) -- rose to
+                             the top on hot_to_cold in the control run;
+                             promote to candidates
+
+  DEMOTE:
+    system_quality_number    (mean/std of rate changes) -- collapsed under
+                             quantized PEBS rates; artifact-sensitive, drop
+    inter_access_interval_ms (mean gap between accesses) -- predictive lead
+                             is real but requires per-access timestamps;
+                             becomes a phase-2 engineering requirement
+                             rather than a ready-made feature
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+  1. Cold-page thinning so real-workload runs hold the 50ms signal cadence
+     -> clean GUPS signal rankings.
+  2. Skylake-class node (c6420): rerun GAPBS PageRank/Twitter with working
+     load telemetry -> read-dominant real workload coverage.
+  3. Timestamp PEBS samples at ingest to restore the inter-access-interval
+     leading signal in telemetry mode.
+  4. Replication runs, then phase-2 model training on the updated shortlist.
+
+================================================================================
+END OF REPORT
+================================================================================

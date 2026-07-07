@@ -28,24 +28,19 @@
                                           * still yields >250K samples per run. */
 #define PEBS_BUFFER_PAGES (1 + (1 << 8)) /* 1MB ring buffer (must be 1+2^n) */
 
-/* Intel PEBS event codes.
- *
- * LOADS: 0x01cd = MEM_TRANS_RETIRED.LOAD_LATENCY_GT_THRESHOLD, the "load
- * latency facility" -- the event perf mem uses.  It guarantees data linear
- * address (DataLA) capture in the PEBS record; requires precise_ip=2 and a
- * latency threshold in config1 (PEBS_LOAD_LATENCY_THRESHOLD=3 cycles captures
- * essentially all loads).
- * NOTE: the previous load event 0x81d0 (MEM_UOPS_RETIRED.ALL_LOADS) counted
- * correctly but reported a bogus constant data address (0xfeb80000) for every
- * load sample on the c220g2 Haswell nodes -- store addresses were fine, so
- * write-heavy workloads masked it.  Read-only regions (gapbs pr) got zero
- * attributed samples, which is how it surfaced.
- *
- * STORES: 0x82d0 = MEM_UOPS_RETIRED.ALL_STORES (Haswell) /
- * MEM_INST_RETIRED.ALL_STORES (Skylake+); address capture verified good. */
-#define PEBS_EVENT_MEM_LOADS 0x01cd  /* MEM_TRANS_RETIRED.LOAD_LATENCY_GT_THRESHOLD */
-#define PEBS_LOAD_LATENCY_THRESHOLD 3 /* config1: min load latency (cycles) */
-#define PEBS_EVENT_MEM_STORES 0x82d0 /* MEM_UOPS_RETIRED.ALL_STORES */
+/* Intel PEBS event codes. */
+#define PEBS_EVENT_MEM_LOADS 0x81d0  /* MEM_INST_RETIRED.ALL_LOADS (Skylake+) */
+#define PEBS_EVENT_MEM_STORES 0x82d0 /* MEM_INST_RETIRED.ALL_STORES */
+/* NOTE on the load event history:
+ * - 0x81d0 addresses are GARBAGE on Haswell/Broadwell (constant 0xfeb8xxxx;
+ *   verified with stock perf mem).  Those nodes are store-only regardless.
+ * - The load-latency facility (0x01cd + ldlat in config1) was used as a
+ *   Haswell workaround, but it samples TAGGED loads only -- roughly 600x
+ *   fewer samples at the same period (303 vs 196K on comparable runs),
+ *   which starved fast Ice Lake runs into empty datasets.
+ * - On Skylake/Ice Lake, 0x81d0 gives full-rate sampling with correct
+ *   DataLA -- verified on the r650 smoke test (20,936 distinct pages,
+ *   reads spread across real heap addresses). */
 
 /*============================================================================
  * DATA STRUCTURES

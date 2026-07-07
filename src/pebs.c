@@ -417,7 +417,7 @@ int pebs_init(void) {
 
   for (int c = 0; c < pebs_state.ncpus; c++) {
     /* Read sampling: load latency facility (guaranteed DataLA capture) */
-    if (setup_perf_event(PEBS_EVENT_MEM_LOADS, PEBS_LOAD_LATENCY_THRESHOLD, 2,
+    if (setup_perf_event(PEBS_EVENT_MEM_LOADS, 0, 2,
                          c, &pebs_state.perf_fd[PEBS_SAMPLE_READ][c],
                          &pebs_state.perf_page[PEBS_SAMPLE_READ][c]) < 0) {
       TM_ERROR("Failed to setup PEBS loads on cpu %d - PEBS may be unavailable", c);

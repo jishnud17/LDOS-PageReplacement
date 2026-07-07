@@ -176,6 +176,34 @@ this table supersedes.
                                with gradual warm-up.
 
 ================================================================================
+RANKING B ADDENDUM: PAGERANK / TWITTER (read-dominant real workload, Ice Lake)
+================================================================================
+The second mentor-provided workload, previously blocked by the Haswell load-
+address defect, collected on a CloudLab r650 (Ice Lake Platinum 8360Y) where
+load attribution is verified correct (smoke test: 20,936 distinct sampled
+pages, no garbage constant).  GAPBS PageRank over the 61.5M-node / 1.47B-edge
+Twitter graph, 10 trials: 784K rows, 10,999 pages tracked VIA LOADS, and the
+study's largest event set (7,809 cold_to_hot + 7,562 hot_to_cold windowed).
+
+  Top signals (bars measured at 357ms, 7.1x nominal -- flagged by the
+  cadence check; notably the slow smoothers did NOT top this ranking,
+  unlike the superseded 30x-stretched run, so the ordering is meaningful):
+
+    cold_to_hot: raw rate 2.67 (1.00) | random_walk_index_high 2.63 (0.98)
+                 | swing_index 1.54 (0.89) | schaff_trend_cycle 1.18 (0.90,
+                 lags +1 bar)
+    hot_to_cold: raw rate 1.57 (0.99) | random_walk_index_high 1.55 (0.95)
+                 | swing_index 1.50 (0.90)
+
+  Mid-field, confirming their final-ranking placements: ADX 0.35-0.51,
+  ichimoku 0.28-0.48, linear regression 0.24-0.29, inter-access interval
+  0.27-0.30.
+
+  SIGNIFICANCE: the volatility family now tops BOTH access directions
+  (store-driven GUPS, load-driven PageRank) and BOTH workload classes
+  (random-access, graph-streaming) -- Ranking C required no changes.
+
+================================================================================
 RANKING C: COMBINED FINAL (all evidence; the rerun resolved the A-vs-B split)
 ================================================================================
 Basis: with the bounded-tracking rerun, the synthetic and real-workload
@@ -281,10 +309,15 @@ FINAL CONCLUSIONS
    residual stretch attributable to the PEBS record-table walk (a known,
    bounded engineering item if true 50ms is ever needed).
 
-5. Platform constraints stand: Haswell-class PEBS attributes stores only
-   (loads report a garbage constant address; confirmed with stock perf
-   tooling) -- full load+store telemetry and the read-dominant workload
-   class (PageRank/Twitter, queued) need Skylake+.
+5. Platform constraints CONFIRMED BY FIX: on Ice Lake (r650), load
+   attribution works (20,936 distinct pages in the smoke test vs 35-64 on
+   Haswell), unblocking PageRank/Twitter -- which then reproduced the
+   volatility-family hierarchy on load-driven telemetry (see Ranking B
+   addendum).  Both mentor-provided workloads are now complete.  One new
+   platform lesson from the fix: the load-latency facility (the Haswell
+   workaround event) samples ~600x fewer loads than ALL_LOADS at the same
+   period -- on fast machines that starves collection entirely; use
+   ALL_LOADS (0x81d0) on Skylake+.
 
 ================================================================================
 END OF REPORT

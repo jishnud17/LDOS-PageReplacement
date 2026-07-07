@@ -1,17 +1,18 @@
 ================================================================================
 REAL-WORKLOAD SIGNAL REACTIVITY RESULTS (standalone)
 LDOS PageReplacement -- heuristics-analysis branch
-Generated: 2026-07-06
+Updated: 2026-07-07 (bounded-tracking rerun + PageRank/Twitter on Ice Lake)
 ================================================================================
 
-This report ranks the per-page signals using ONLY the datasets collected in
-this experiment round (PEBS telemetry-only collection).  Comparison against
-the phase-1 synthetic study lives in results/final_signal_conclusions.txt.
+This report ranks the per-page signals using ONLY real-workload-round
+datasets (PEBS telemetry-only collection).  Cross-study comparison and the
+final feature list live in results/final_signal_conclusions.txt.
 
 SIGNAL GLOSSARY (what each metric measures, in access-rate terms)
 -----------------------------------------------------------------
 Every signal is computed per page over a rolling window of access-rate bars
-(one bar per sampling interval; nominally 50ms).
+(one bar per sampling interval; nominally 50ms -- ACTUAL bar width is
+measured from timestamps and reported per dataset below).
 
   random_walk_index_high   How far the access rate actually moved over N bars
                            vs. what a random walk would produce.  High value =
@@ -31,7 +32,9 @@ Every signal is computed per page over a rolling window of access-rate bars
   aroon_down / aroon_up    Bars since the window's minimum / maximum rate.
   interval_access_rate     The raw per-bar access rate itself (not an
                            indicator; the underlying series).
-  inter_access_interval_ms Mean time gap between consecutive accesses.
+  inter_access_interval_ms Mean time gap between consecutive accesses --
+                           since this round, measured from HARDWARE PEBS
+                           sample timestamps (EWMA of inter-sample gaps).
   system_quality_number    Mean rate-change divided by std of rate-changes.
   ichimoku_* family        Moving-average midpoints over 9/26/52-bar windows.
                            NOTE: ichimoku_chikou duplicates interval_access_
@@ -43,173 +46,175 @@ Every signal is computed per page over a rolling window of access-rate bars
 
 WHAT WAS RUN
 ------------
-All workloads under identical collection: telemetry-only mode (LD_PRELOAD
-shim intercepts the application's large allocations; pages fault natively;
-access data comes exclusively from PEBS hardware sampling on per-CPU events
-covering all threads; no migrations).  Overhead: zero measurable (GUPS
-throughput identical with and without the manager attached).
+All under telemetry-only collection: LD_PRELOAD shim intercepts the
+application's large allocations; pages fault natively (zero measurable
+overhead); access data comes exclusively from PEBS hardware sampling on
+per-CPU events covering all threads; bounded page tracking
+(LDOS_MIN_SAMPLES_TO_TRACK=3) holds the signal cadence; PEBS sample
+timestamps drive the inter-access signal.
 
-  A. hot_cold synthetic (graded hot/warm/cold split) under telemetry mode.
-     410 hot pages tracked, 52K rows.
-     Events: 413 hot_to_cold, 17 cold_to_hot.
-     Signal cadence: held at ~50ms bars (clean).
+  A. hot_cold synthetic CONTROL (c220g2 Haswell, store-attributed)
+     410 hot pages, 50K rows.  Bars measured 90ms (1.8x nominal).
+     Events: 416 hot_to_cold, 71 cold_to_hot (8 windowed).
 
-  B. GUPS hotset-move (gups_hemem from the provided workloads repo; the
-     HeMem benchmark).  90/10 skewed random updates over a 2GB table; the
-     hot set RELOCATES mid-run -- a real hot-set migration.
-     2.49M rows, 159K pages observed.
-     Events: 83 hot_to_cold, 52 cold_to_hot (41 / 18 with full windows).
-     Signal cadence: STRETCHED to ~1.5s bars (159K tracked pages overloaded
-     the 50ms signal loop) -- see caveat under B's rankings.
+  B. GUPS hotset-move x2  (gups_hemem / HeMem benchmark; c220g2)
+     90/10 skewed updates over a 2GB table; hot set RELOCATES mid-run.
+     ~220K rows, ~3,000 pages per run.  Bars measured 200/205ms (4x).
+     Events per run: ~790 cold_to_hot + ~785 hot_to_cold (741-765 windowed).
+     REPLICATED: r1 and r2 agree within a few percent on every number below.
 
-  C. GUPS skewed (static hot set): run completed too quickly (3s) to
-     accumulate enough bars per page for event analysis.  No rankings.
+  C. GUPS skewed x2  (static 90/10 hot set; c220g2)
+     ~74K rows, ~950-970 pages per run.  Bars measured 143ms (2.9x).
+     Events per run: 128/129 hot_to_cold (96 windowed).  REPLICATED.
 
-  D. GAPBS PageRank / Twitter graph: integrated and executed end-to-end,
-     but produced no load telemetry due to a hardware defect on this node
-     family (see PEBS HARDWARE FINDING).
-
-================================================================================
-RANKINGS A: hot_cold SYNTHETIC UNDER TELEMETRY COLLECTION (clean 50ms cadence)
-================================================================================
-
---- hot_to_cold (n=413 events) --- ranked by score = amplitude x consistency
-
-  signal (what it measures)                     ampl   consist  lead_ms  score
-  random_walk_index_low (short-window trend)    1.71    0.96      +50    1.64
-  range_action_verification_index
-    (short-vs-long MA momentum)                 1.63    0.96      +150   1.57
-  interval_access_rate (raw rate itself)        1.51    1.00        0    1.51
-  random_walk_index_high (long-window trend)    1.12    1.00        0    1.12
-  accum_swing_index (cumulative move size)      1.09    1.00        0    1.09
-  parabolic_sar (trailing trend level)          1.24    0.81        0    1.00
-  schaff_trend_cycle (cycle detector)           1.01    0.95      +50    0.95
-  recency_weighted_frequency (decayed rate)     0.94    0.98      +100   0.93
-  schaff_trend_cycle_signal (extra smoothing)   1.01    0.89      +100   0.90
-  swing_index (per-bar move size)               1.18    0.75        0    0.88
-  parabolic_sar_direction (trend-flip flag)     1.01    0.81        0    0.82
-  linear_reg_slope (fitted trend slope)         0.71    0.99      +100   0.70
-
-  Near-zero on this dataset:
-  system_quality_number (mean/std of changes)   0.04    0.99        0    0.04
-  inter_access_interval_ms (gap between hits)   0.01    0.51      -50    0.01
-  ichimoku family (slow moving averages)        0.09-0.32              < 0.30
-  vertical_horizontal_filter                    0.13    0.90      +100   0.12
-  gopalakrishnan_range_index                    0.02    0.85      -50    0.02
-
---- cold_to_hot (n=17 events; small sample) ---
-
-  signal                                        ampl   consist  lead_ms  score
-  swing_index (per-bar move size)               2.20    0.88     -100    1.94
-  random_walk_index_high (long-window trend)    1.67    0.88     -200    1.47
-  schaff_trend_cycle (cycle detector)           0.99    0.82     +100    0.81
-  interval_access_rate (raw rate)               0.87    0.88     -200    0.77
-  parabolic_sar (trailing trend level)          0.98    0.76        0    0.75
-  accum_swing_index (cumulative move size)      0.85    0.88     -200    0.75
-  parabolic_sar_direction (trend-flip flag)     1.15    0.65        0    0.75
-  random_walk_index_low (short-window trend)    0.74    0.88     -200    0.65
-  aroon_up (bars since max rate)                0.69    0.94        0    0.65
-
-TAKEAWAYS FOR DATASET A
-  1. The volatility/trend family dominates: random_walk_index (both
-     windows), swing_index, accum_swing_index, and RAVI hold the top of
-     both event types with 0.88-1.00 consistency.
-  2. schaff_trend_cycle reacts reliably but LAGS (+50 to +150ms): a
-     confirmation signal, not a predictor.
-  3. parabolic_sar / _direction are solid coincident direction features.
-  4. system_quality_number and inter_access_interval_ms are effectively
-     dead in this dataset (amplitudes 0.01-0.04).
-  5. Slow smoothers (Ichimoku, VHF, GAPO) are dead weight at 50ms cadence.
+  D. GAPBS PAGERANK on the TWITTER GRAPH  (r650 Ice Lake Platinum 8360Y)
+     61.5M nodes / 1.47B edges, 10 trials.  784K rows, 10,999 pages tracked
+     VIA LOAD ATTRIBUTION -- the read-dominant workload class, previously
+     impossible on Haswell-generation nodes (see HARDWARE FINDINGS).
+     Bars measured 357ms (7.1x).  Events: 9,227 cold_to_hot + 9,005
+     hot_to_cold (7,809 / 7,562 windowed) -- the study's largest event set.
 
 ================================================================================
-RANKINGS B: GUPS HOTSET-MOVE (real benchmark; COARSE ~1.5s cadence)
+RANKINGS A: hot_cold CONTROL (90ms bars; n=416 hot_to_cold, 8 cold_to_hot)
 ================================================================================
 
-CAVEAT FOR THIS TABLE: with bars stretched to ~1.5s, the benchmark's
-transitions are single-bar cliffs -- nearly every signal fires on the same
-bar, so this ranking reflects amplitude normalization at coarse resolution,
-NOT reaction speed.  Read it as "which signals fire on a real workload's
-transitions at all," not "which react fastest."
+  hot_to_cold (n=416):
+    signal                                      ampl   consist  lead     score
+    random_walk_index_low (short-window trend)  1.97    1.00     +89ms   1.97
+    range_action_verification_index (RAVI)      1.76    1.00     +269ms  1.76
+    interval_access_rate (raw rate)             1.61    1.00     0       1.61
+    accum_swing_index (cumulative move)         1.25    1.00     0       1.25
+    random_walk_index_high (long-window trend)  1.19    1.00     -89ms   1.19
+    swing_index (per-bar move size)             1.33    0.86     -89ms   1.14
+    recency_weighted_frequency (decayed rate)   1.03    0.99     +179ms  1.02
+    schaff_trend_cycle (cycle detector)         0.99    0.99     +89ms   0.98
 
---- hot_to_cold (n=41 events) ---
+  cold_to_hot (n=8 -- tiny sample, indicative only):
+    inter_access_interval_ms (gap between hits) 4.29    0.75     -448ms  3.22
+    random_walk_index_high                      1.90    1.00     -358ms  1.90
+    swing_index                                 1.83    1.00     -179ms  1.83
 
-  signal                                        ampl   consist  lead_ms  score
-  avg_directional_index (trend strength)         9.6    1.00      +50    9.58
-  aroon_down (bars since min rate)               8.7    0.95      -50    8.24
-  supertrend (trend band level)                  6.3    0.93        0    5.84
-  interval_access_rate (raw rate)                5.5    1.00        0    5.51
-  parabolic_sar (trailing trend level)           5.7    0.88     +100    4.99
-  minus_directional_indicator (down momentum)    5.7    0.78      +50    4.46
-  recency_weighted_frequency (decayed rate)      4.8    0.93      +50    4.45
-  random_walk_index_low (short-window trend)     3.9    0.93        0    3.64
-  random_walk_index_high (long-window trend)     1.5    0.95      -50    1.44
-  swing_index (per-bar move size)                1.1    0.90      -50    1.02
-
-  Notably weak even here:
-  schaff_trend_cycle (cycle detector)            0.73   0.41        0    0.30
-  inter_access_interval_ms (gap between hits)    0.001  0.83        0    0.001
-
---- cold_to_hot (n=18 events) ---
-
-  signal                                        ampl   consist  lead_ms  score
-  interval_access_rate (raw rate)               32.3    0.89      +50   28.7
-  linear_reg_slope (fitted trend slope)         28.9    0.94     +100   27.3
-  supertrend (trend band level)                 22.6    0.89      +50   20.1
-  ichimoku family (slow moving averages)       16-20    0.83-0.89 +50   16-18
-  linear_reg_intercept (fitted trend level)     15.4    0.94     +100   14.6
-  recency_weighted_frequency (decayed rate)     15.4    0.89     +150   13.7
-  avg_directional_index (trend strength)         9.7    1.00      +50    9.67
-  random_walk_index_high (long-window trend)     7.3    1.00        0    7.31
-  accum_swing_index (cumulative move size)       7.0    0.83      +50    5.83
-  swing_index (per-bar move size)                4.1    0.94        0    3.85
-
-TAKEAWAYS FOR DATASET B
-  1. The pipeline detects real transitions on a real benchmark: 135 events
-     from a genuine hot-set relocation, with 5-32 sigma responses at
-     0.83-1.00 consistency.
-  2. random_walk_index_high fires with perfect consistency (1.00) on both
-     event types -- robust on a workload it was never tuned on.
-  3. Slow signals (Ichimoku, linear regression, supertrend) rank highly
-     here only because 1.5s bars flatten the timescale differences; at
-     proper cadence (dataset A) they are dead weight.  Measurement
-     artifact to engineer away (bound tracked pages), not a signal finding.
-  4. inter_access_interval_ms is dead here as well.
+  KEY RESULT: with hardware-timestamped gaps, inter_access_interval_ms
+  LEADS cold_to_hot by ~-450ms at 4.3 sigma -- the phase-1 leading behavior
+  restored under production collection.  (n=8; treat as a demonstrated
+  mechanism, not yet a statistically strong effect.)
 
 ================================================================================
-PEBS HARDWARE FINDING (affects what this node family can measure)
+RANKINGS B: GUPS HOTSET-MOVE x2 (200ms bars; n=741-765 per event per run)
 ================================================================================
 
-On the CloudLab c220g2/g5 (Haswell-generation) nodes, PEBS LOAD sampling
-counts events correctly but reports a garbage constant data address
-(0xfeb8xxxx) for virtually all load samples.  STORE address capture is
-correct.  Verified independently with stock `perf mem` (kernel reference
-tooling, our code not involved), and cross-checked against three event
-encodings.
+  cold_to_hot (r1 / r2):
+    random_walk_index_high    2.12 / 2.09   at 0.89 / 0.86   coincident
+    random_walk_index_low     1.53 / 1.51   at 0.96 / 0.96   coincident
+    swing_index               0.70 / 0.81   at 0.81 / 0.82   coincident
+    schaff_trend_cycle        0.79 / 0.83   at 0.67 / 0.67   LAGS +2 bars
 
-Consequences:
-  - All telemetry in this round is store-driven.  Write-bearing workloads
-    (GUPS updates, synthetic hot pages) attribute perfectly; read-only
-    regions (PageRank's graph arrays) are invisible.
-  - GAPBS PageRank / Twitter requires a Skylake-class node (e.g. CloudLab
-    c6420) -- the hardware class MEMTIS and HeMem target.
-  - Secondary finding: a dense single-address store stream (a debug sink
-    written every loop iteration) absorbed store attribution from
-    neighboring stores (612K samples -> 64 pages; removing it restored
-    410/410 hot pages).  Transparent Huge Pages were ruled out by direct
-    experiment.
+  hot_to_cold (r1 / r2):
+    random_walk_index_high    1.68 / 1.73   at 0.97 / 0.97   coincident
+    random_walk_index_low     1.66 / 1.68   at 0.89 / 0.90   coincident
+    swing_index               0.53 / 0.61   at 0.79 / 0.80
+    schaff_trend_cycle        0.67 / 0.72   at 0.65 / 0.66
+
+  Collapsed on this workload (formerly top under a 30x-stretched clock,
+  confirming them as cadence artifacts): avg_directional_index 0.29 at
+  0.57; linear regression weak lagger; ichimoku near-bottom; supertrend
+  out of the top-12.
+
+  inter_access_interval_ms is flat here -- AND SO IS EVERY OTHER SIGNAL'S
+  LEAD: GUPS relocates its hot set instantaneously, and a step transition
+  has no precursor for any signal to detect.  Leading behavior requires
+  workloads with gradual warm-ups.
+
+================================================================================
+RANKINGS C: GUPS SKEWED x2 (143ms bars; n=96 hot_to_cold per run)
+================================================================================
+
+    random_walk_index_low     3.59 / 3.57   at 1.00 / 1.00   <- perfect, twice
+    swing_index               2.40 / 3.04   at 0.92 / 0.99
+    accum_swing_index         1.71 / 1.66   at 1.00 / 1.00
+
+================================================================================
+RANKINGS D: PAGERANK / TWITTER (357ms bars; n=7,809 + 7,562)
+================================================================================
+
+  cold_to_hot (n=7,809):
+    signal                                      ampl   consist  lead
+    interval_access_rate (raw rate)             2.67    1.00    coincident
+    random_walk_index_high                      2.63    0.98    coincident
+    swing_index                                 1.54    0.89    coincident
+    recency_weighted_frequency                  1.38    1.00    lags +1 bar
+    schaff_trend_cycle                          1.18    0.90    lags +1 bar
+
+  hot_to_cold (n=7,562):
+    interval_access_rate (raw rate)             1.57    0.99
+    random_walk_index_high                      1.55    0.95
+    swing_index                                 1.50    0.90
+    random_walk_index_low                       1.37    0.84
+
+  Mid-field (consistent with their standing everywhere else at valid
+  cadence): avg_directional_index 0.35-0.51, ichimoku 0.28-0.48, linear
+  regression 0.24-0.29, inter_access_interval 0.27-0.30.
+
+  Despite the 7.1x cadence stretch, the slow smoothers did NOT top this
+  ranking -- the ordering reflects the signals, not the clock.
+
+================================================================================
+CROSS-DATASET TAKEAWAYS (this round only)
+================================================================================
+
+1. RANDOM WALK INDEX is #1 or #2 in every dataset above -- on store-driven
+   random-access updates (GUPS) AND load-driven power-law graph streaming
+   (Twitter), replicated where runs were repeated.  swing_index is the
+   consistent runner-up.
+
+2. schaff_trend_cycle reacts in every dataset and lags in every dataset
+   (+1-2 bars).  A confirmation signal, universally.
+
+3. The leading signal (inter_access_interval_ms) works under production
+   collection when transitions have warm-up ramps (control: -450ms lead)
+   and cannot work when they are step functions (GUPS) -- nor does
+   anything else.
+
+4. ADX, linear regression, ichimoku, supertrend: mid-field or dead in
+   every dataset at valid cadence.  Their earlier prominence was a
+   measurement artifact of a 30x-stretched clock (superseded data).
+
+================================================================================
+HARDWARE FINDINGS (platform requirements for this telemetry)
+================================================================================
+
+1. Haswell/Broadwell (CloudLab c220g2/g5): PEBS LOAD data addresses are a
+   garbage constant (0xfeb8xxxx) -- verified with stock perf mem.  STORE
+   addresses are correct.  These nodes support store-driven telemetry only;
+   read-only regions are invisible.
+
+2. Ice Lake (CloudLab r650, Platinum 8360Y): load attribution verified
+   correct -- smoke test sampled 20,936 distinct pages with reads across
+   real heap addresses and no garbage constant.  This is what unblocked
+   PageRank/Twitter.
+
+3. New this round: the load-latency facility (event 0x1CD, used as the
+   Haswell workaround) samples TAGGED loads only -- roughly 600x fewer
+   samples than ALL_LOADS at the same period.  On the fast Ice Lake node
+   it starved a 3.4s PageRank trial to ~500 read samples (empty dataset).
+   Fixed by returning to ALL_LOADS (0x81d0), which is address-correct on
+   Skylake+.  Lesson: sampling EVENT choice interacts with machine speed.
 
 ================================================================================
 LIMITATIONS
 ================================================================================
 
-1. GUPS rankings are cadence-distorted (see B's caveat).  Clean rankings
-   need the tracked-page bound first.
-2. gups-skewed run too short for analysis; rerun is cheap when node time
-   permits (hotset-move covers the same pattern plus the transition).
-3. cold_to_hot samples are small (n=17-18): pages with no write activity
-   produce no samples on this node family, so pages first appear in the
-   data near their warm-up.
-4. Single run per configuration; no replication yet.
+1. Bar cadence ran 1.8-7.1x nominal (measured and labeled per dataset by
+   the analysis' built-in cadence check; driver is the PEBS record-table
+   walk at high page counts).  Sufficient for the rankings above -- the
+   coarse-clock failure mode (smoothers taking over) demonstrably did not
+   occur -- but lead/lag values are quantized to the measured bar width.
+2. The control's cold_to_hot sample is small (n=8): unwritten pages are
+   invisible until first attribution on store-only hardware.
+3. Twitter collected on different hardware (Ice Lake) than the GUPS runs
+   (Haswell) -- a necessity, not a choice; the signal hierarchy agreeing
+   across both mitigates the concern.
+4. GUPS runs replicated x2; Twitter and the control are single runs.
 
 ================================================================================
 END OF REPORT

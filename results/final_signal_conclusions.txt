@@ -212,15 +212,18 @@ therefore needs no clock-dependent hedging: it is supported by phase-1,
 the control, and the replicated real-workload runs simultaneously.
 
   GOOD
-   1. RANDOM WALK INDEX        #1 or top-3 in EVERY valid dataset in the
+   1. RANDOM WALK INDEX        (rwi_high + rwi_low)
+                               #1 or top-3 in EVERY valid dataset in the
                                study: P1 #1 everywhere, CTL top-5, and #1 on
                                the replicated real-workload rerun (both
                                variants, both runs, consistency up to 1.00).
                                The unconditional keeper; use both windows.
-   2. SWING INDEX              top-3 across P1, CTL, and the rerun (#2 on
+   2. SWING INDEX              (swing_index)
+                               top-3 across P1, CTL, and the rerun (#2 on
                                skewed at 0.92-0.99 consistency); the
                                per-bar-move complement to RWI's windowed view
-   3. INTER-ACCESS INTERVAL    the only signal that ever LEADS, now proven
+   3. INTER-ACCESS INTERVAL    (inter_access_interval_ms)
+                               the only signal that ever LEADS, now proven
                                under production (telemetry) collection:
                                4.3 sigma at -449ms on the rerun control.
                                Flat on GUPS -- but so is everything: GUPS's
@@ -231,7 +234,8 @@ the control, and the replicated real-workload runs simultaneously.
                                step-transition benchmarks do not).
 
   POTENTIAL SUPPLEMENTARY
-   4. SCHAFF TREND CYCLE       the confirmed universal confirmer: reacts in
+   4. SCHAFF TREND CYCLE       (schaff_trend_cycle)
+                               the confirmed universal confirmer: reacts in
                                every dataset, always +1-2 bars late, never
                                predictive.  Include as a confirmation input.
    5. ACCUM SWING INDEX        near-perfect consistency in the rerun but

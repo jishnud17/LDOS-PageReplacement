@@ -1,0 +1,93 @@
+================================================================================
+WORKLOAD RUN INVENTORY
+Every dataset collected, its configuration, and its size
+LDOS PageReplacement -- heuristics-analysis branch
+Updated: 2026-07-07
+================================================================================
+
+PHASE 1 -- SYNTHETIC WORKLOADS
+(full management: userfaultfd demand paging + write-protect counting + PEBS;
+CloudLab c220g2 Haswell; data in data/phase1/, analysis in results/phase1/)
+
+  Workload    Configuration                              Rows      Events
+  ----------  -----------------------------------------  --------  ----------------
+  hot_cold    16MB / 4,096 pages: 409 hot (64 hits/      252,942   3,296 cold_to_hot
+              sweep), 819 warm (8), 2,868 cold (1/37);              3,308 hot_to_cold
+              6s active + soak                                      267 migrations
+  sequential  uniform sweeps, all 4,096 pages, 4 hits/   215,505   8,701 cold_to_hot
+              page/sweep, 6s                                        9,654 hot_to_cold
+                                                                    92 migrations
+  temporal    region A hot 3s -> region B hot 3s         260,975   1,057 cold_to_hot
+              (10% of pages per region)                             1,059 hot_to_cold
+                                                                    285 migrations
+
+VALIDATION -- REAL WORKLOADS + CONTROL
+(telemetry-only collection: LD_PRELOAD shim + PEBS hardware sampling on
+per-CPU events, all threads; bounded tracking LDOS_MIN_SAMPLES_TO_TRACK=3;
+hardware-timestamped inter-access gaps; no migrations.  Data in
+data/validation/, analysis in results/validation/.  Bar cadence below is
+MEASURED from row timestamps by the analysis, vs. 50ms nominal.)
+
+  Dataset             Configuration                Rows     Pages   Bars   Events (windowed)
+  ------------------  ---------------------------  -------  ------  -----  --------------------
+  hot_cold control    same synthetic under the     50,539   410     90ms   416 hot_to_cold
+  (c220g2)            new collection method                                 8 cold_to_hot
+  gups-hotset-move    HeMem benchmark from the     224,511  3,031   200ms  741 cold_to_hot
+  r1 (c220g2)         mentor workloads repo:                                765 hot_to_cold
+                      4 threads, 2^31=2GB table,
+                      8B elements, 2^19=512KB hot
+                      set (90/10 skew), hot set
+                      RELOCATES at t=15s, 35s run
+  gups-hotset-move    identical replicate          217,504  2,997   205ms  758 cold_to_hot
+  r2 (c220g2)                                                              742 hot_to_cold
+  gups-skewed r1      static 90/10 hot set, same   73,682   967     143ms  96 hot_to_cold
+  (c220g2)            geometry, 1e9 updates/
+                      thread, ~24s
+  gups-skewed r2      identical replicate          73,855   950     143ms  96 hot_to_cold
+  (c220g2)
+  gapbs PageRank /    Twitter graph: 61,578,415    784,443  10,999  357ms  7,809 cold_to_hot
+  Twitter (r650       nodes, 1,468,364,884 edges                           7,562 hot_to_cold
+  Ice Lake)           (12GB .sg); 10 trials x 20
+                      iterations; pages tracked
+                      VIA LOAD ATTRIBUTION;
+                      divisor 128
+
+  Replication note: gups r1/r2 pairs agree within a few percent on every
+  headline reactivity number (e.g. rwi_high 2.12 vs 2.09; rwi_low on skewed
+  3.59 vs 3.57, both at 1.00 consistency).
+
+TOTALS
+------
+  ~1.88M rows of per-page signal time series across 9 datasets
+  (42 columns each: 10 base + 32 signal components)
+  ~34,000 windowed state-change events feeding the reactivity analysis
+  2 real benchmarks, both from the mentor-provided workloads repo
+  (SujayYadalam94/workloads: gups_hemem; gapbs + memtis gen-twitter diff),
+  GUPS replicated x2 per variant
+  3 hardware platforms: c220g2/g5 (Haswell -- store-attribution only),
+  r650 (Ice Lake Platinum 8360Y -- load attribution verified working)
+
+SUPERSEDED RUNS (collected, then replaced by better-configured reruns)
+----------------------------------------------------------------------
+  - gups runs at 1.5s bars (159K tracked pages overloaded the 50ms signal
+    loop; rankings were cadence artifacts) -> replaced by the bounded-
+    tracking r1/r2 runs above
+  - first Ice Lake twitter attempt (empty: the load-latency facility
+    samples ~600x fewer loads than ALL_LOADS; switched to 0x81d0)
+  - all Haswell twitter attempts (loads unattributable on that hardware)
+
+CONFIGURATION DELTAS vs THE LAB'S run_workload.sh (ARMS harness)
+-----------------------------------------------------------------
+For comparability discussions: the lab harness runs GUPS at 16 threads /
+2^36=64GB table / 2^33=8GB hot set, and PageRank at -i 150 -t 0 with
+OMP_NUM_THREADS=16 + numactl -N0, interpose threshold 128MB, under DRAM
+capacity budgets.  Our configs are smaller ON PURPOSE: per-page 50ms signal
+series require PEBS sample density -- at an 8GB hot set (~2M hot pages),
+each hot page is sampled roughly once a minute at our sampling period,
+making per-page bars statistically empty.  Scale vs. per-page granularity
+is a real trade-off to decide for phase 2.  (Our runs also apply no DRAM
+budget: telemetry mode measures signals without capacity pressure.)
+
+================================================================================
+END
+================================================================================

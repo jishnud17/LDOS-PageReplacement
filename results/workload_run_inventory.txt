@@ -53,20 +53,49 @@ below is MEASURED from row timestamps by the analysis, vs. 50ms nominal.)
                       VIA LOAD ATTRIBUTION;
                       divisor 128
 
+  ---- second real-workload round (sm110p, Ice Lake Xeon Silver 4314) ----
+  All below: telemetry-only, threshold 3, divisor 128, load-attributed.
+
+  gapbs bc /          Betweenness Centrality on   635,616  1,848   97ms   11 cold_to_hot
+  Twitter             the SAME twitter.sg;                              11 hot_to_cold
+                      -n 1 -i 30, 16 threads.                           (small sample --
+                      Frontier-based BFS access.                         see limitations)
+  gapbs cc_sv /       Connected Components on     106,566  3,644   112ms  NO EVENTS
+  kron                kron.sg (67,108,864 nodes,                        (run too short:
+                      1,051,923,236 edges),                              ~29 rows/page)
+                      -n 2, 16 threads
+  XSBench             Monte Carlo neutron       4,710,126  4,948   186ms  65,961 cold_to_hot
+  (HPC, non-graph)    transport, H-M large:                             65,408 hot_to_cold
+                      -g 130000 -p 20000000                             LARGEST event set
+                      -t 16; 65GB grid; 680M                            in the study
+                      lookups, 172s
+  liblinear           L1-regularized logistic   6,474,597  14,621  228ms  8,414 cold_to_hot
+  (ML training)       regression on kddb (4.8GB,                        8,532 hot_to_cold
+                      29.9M features); -s 6 -m 16;
+                      8 iterations, 205s.  20+
+                      managed regions (154MB-9.5GB)
+
   Replication note: gups r1/r2 pairs agree within a few percent on every
   headline reactivity number (e.g. rwi_high 2.12 vs 2.09; rwi_low on skewed
   3.59 vs 3.57, both at 1.00 consistency).
 
 TOTALS
 ------
-  ~1.88M rows of per-page signal time series across 9 datasets
+  ~13.8M rows of per-page signal time series across 13 datasets
   (42 columns each: 10 base + 32 signal components)
-  ~34,000 windowed state-change events feeding the reactivity analysis
-  2 real benchmarks, both from the mentor-provided workloads repo
-  (SujayYadalam94/workloads: gups_hemem; gapbs + memtis gen-twitter diff),
+  ~180,000 windowed state-change events feeding the reactivity analysis
+  6 distinct real workloads from the mentor-provided repo + script:
+    gups (hotset-move, skewed), gapbs pr / bc / cc_sv, XSBench, liblinear
   GUPS replicated x2 per variant
-  3 hardware platforms: c220g2/g5 (Haswell -- store-attribution only),
-  r650 (Ice Lake Platinum 8360Y -- load attribution verified working)
+  4 hardware platforms: c220g2/g5 (Haswell -- store-attribution only),
+  r650 (Ice Lake Platinum 8360Y) and sm110p (Ice Lake Xeon Silver 4314)
+  -- load attribution verified working on both Ice Lake parts
+
+  NOTE ON DATA STORAGE: the XSBench (405MB) and liblinear (305MB) gzipped
+  datasets exceed GitHub's 100MB file limit and are kept locally under
+  data/large_local/ (gitignored).  Their analysis outputs ARE committed
+  under results/real_workloads/, and the exact run commands above
+  regenerate them.
 
 SUPERSEDED RUNS (collected, then replaced by better-configured reruns)
 ----------------------------------------------------------------------

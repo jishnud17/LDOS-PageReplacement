@@ -208,6 +208,56 @@ study's largest event set (7,809 cold_to_hot + 7,562 hot_to_cold windowed).
   (store-driven GUPS, load-driven PageRank) and BOTH workload classes
   (random-access, graph-streaming) -- Ranking C required no changes.
 
+
+================================================================================
+RANKING B ADDENDUM 2: FOUR MORE REAL WORKLOADS (Ice Lake sm110p)
+================================================================================
+Four additional workloads from the mentor's run_workload.sh, chosen to widen
+ACCESS-PATTERN coverage rather than add more of the same: graph-frontier (bc),
+graph union-find (cc), HPC Monte Carlo (XSBench), and ML training (liblinear).
+All telemetry-only, bounded tracking, load-attributed on Ice Lake.
+
+  XSBench -- Monte Carlo neutron transport, the study's LARGEST event set
+  (65,961 cold_to_hot + 65,408 hot_to_cold; 4.7M rows, 186ms bars).  The
+  first NON-GRAPH real workload in the study.
+    cold_to_hot:  raw rate 2.56 (1.00) | random_walk_index_high 2.50 (0.97)
+                  | parabolic_sar_direction 1.92 (0.67)
+                  | random_walk_index_low 1.19 (0.90)
+                  | swing_index 1.16 (0.88)
+                  | schaff_trend_cycle 1.02 (0.88, LAGS +185ms)
+    hot_to_cold:  raw rate 1.47 (1.00) | random_walk_index_high 1.37 (0.93)
+                  | swing_index 1.26 (0.88) | random_walk_index_low 1.18 (0.92)
+
+  liblinear -- L1-regularized logistic regression on kddb (8,414 + 8,532
+  events; 6.5M rows, 228ms bars).  Notably allocates 20+ separate regions
+  (154MB-9.5GB) rather than one giant array -- a different allocation
+  shape from every other workload, caught only because the interpose
+  threshold was lowered to 128MB.
+    cold_to_hot:  raw rate 5.67 (1.00) | random_walk_index_high 4.79 (0.96)
+                  | recency_weighted_frequency 2.22 (0.98, lags)
+                  | random_walk_index_low 1.56 (0.86) | swing_index 1.41 (0.87)
+    hot_to_cold:  raw rate 3.32 (1.00) | random_walk_index_high 2.68 (1.00)
+                  | random_walk_index_low 1.75 (0.91) | swing_index 1.28 (0.86)
+
+  gapbs bc / Twitter -- Betweenness Centrality, frontier-based BFS traversal
+  over the same Twitter graph as PageRank.  Only 11 windowed events per type,
+  so amplitudes (12-21 sigma) and the uniform 1.00 consistency are NOT
+  reliable -- small-n inflates both.  Directionally consistent with the rest
+  (random_walk_index_high and swing_index in the top 4 on both event types)
+  but treated as suggestive, not evidence.
+
+  gapbs cc_sv / kron -- NO EVENTS DETECTED.  The run was too short (two ~7s
+  trials, ~29 rows per page), so no page accumulated enough bar history for
+  the detector's debounce + window requirements.  Same failure mode as the
+  original short gups-skewed run; fixable with -n 10 instead of -n 2.
+
+  SIGNIFICANCE: random_walk_index_high is the top-ranked INDICATOR (the raw
+  rate and its duplicate ichimoku_chikou are the underlying series, not
+  indicators) on both statistically strong new datasets -- one HPC physics
+  simulation and one ML training job, neither of which is a graph workload.
+  swing_index follows it, and schaff_trend_cycle lags as it does everywhere.
+  Ranking C is unchanged by this round.
+
 ================================================================================
 RANKING C: COMBINED FINAL (all evidence; the rerun resolved the A-vs-B split)
 ================================================================================

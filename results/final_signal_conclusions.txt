@@ -8,15 +8,19 @@ Generated: 2026-07-06
 Inputs:
   results/synthetic_workloads/
       3 synthetic workloads (hot_cold, sequential, temporal) under FULL
-      management (userfaultfd + write-protect counting + PEBS).  Clean
-      50ms bars.
+      management (userfaultfd + write-protect counting + PEBS), clean
+      50ms bars.  hot_cold/ additionally holds the same workload measured
+      by PEBS sampling alone (*_pebs) -- the UFFD-vs-PEBS measurement
+      control.
   results/real_workloads/
-      hot_cold CONTROL rerun under telemetry-only collection, plus the
-      GUPS variants (HeMem benchmark) and GAPBS PageRank on Twitter.
+      GUPS variants (HeMem benchmark), GAPBS PageRank / BC / CC,
+      XSBench, and liblinear.
 
 Evidence labels used in the rankings below:
   SYN  = the 3 synthetic workloads (hot_cold, sequential, temporal)
-  CTL  = the synthetic control rerun under telemetry-only collection
+  CTL  = the measurement control: the hot_cold synthetic workload re-run
+         under PEBS sampling instead of userfaultfd, so SYN vs CTL isolates
+         the instrument change from any workload change
   GUPS = the replicated GUPS runs (hotset-move and skewed)
 
 Score = amplitude x consistency of the event-triggered average around

@@ -17,8 +17,14 @@ Datasets and analysis outputs are grouped by workload:
   results/real_workloads/<workload>/
 
   Workload folders: hot_cold, sequential, temporal (synthetic);
-  hot_cold_control, gups_hotset_move, gups_skewed, gapbs_pr_twitter,
-  gapbs_bc_twitter, gapbs_cc_kron, xsbench, liblinear (real).
+  gups_hotset_move, gups_skewed, gapbs_pr_twitter, gapbs_bc_twitter,
+  gapbs_cc_kron, xsbench, liblinear (real).
+
+  hot_cold/ holds the SAME workload measured two ways -- *_uffd (phase-1
+  userfaultfd: every access counted) and *_pebs (hardware sampling, the
+  method real workloads use).  That pair is the measurement control: only
+  the instrument differs, so any ranking change between them is an
+  artifact of measurement, not of workload.
 
 ================================================================================
 
@@ -39,7 +45,18 @@ results/synthetic_workloads/)
               (10% of pages per region)                             1,059 hot_to_cold
                                                                     285 migrations
 
-REAL WORKLOADS (plus the synthetic control)
+  MEASUREMENT CONTROL (same hot_cold workload, PEBS instead of UFFD;
+  sm110p/c220g2, telemetry-only, 90ms measured bars):
+
+  hot_cold    identical workload + code, but         50,539   416 hot_to_cold
+  _pebs       access data from PEBS sampling                  8 cold_to_hot
+              only -- no userfaultfd.  Isolates
+              the effect of the measurement switch
+              from the effect of changing workload.
+              Caught system_quality_number as an
+              artifact (phase-1 top-3 -> ~0 here).
+
+REAL WORKLOADS
 (telemetry-only collection: LD_PRELOAD shim + PEBS hardware sampling on
 per-CPU events, all threads; bounded tracking LDOS_MIN_SAMPLES_TO_TRACK=3;
 hardware-timestamped inter-access gaps; no migrations.  Data in
@@ -48,8 +65,6 @@ below is MEASURED from row timestamps by the analysis, vs. 50ms nominal.)
 
   Dataset             Configuration                Rows     Pages   Bars   Events (windowed)
   ------------------  ---------------------------  -------  ------  -----  --------------------
-  hot_cold control    same synthetic under the     50,539   410     90ms   416 hot_to_cold
-  (c220g2)            new collection method                                 8 cold_to_hot
   gups-hotset-move    HeMem benchmark from the     224,511  3,031   200ms  741 cold_to_hot
   r1 (c220g2)         mentor workloads repo:                                765 hot_to_cold
                       4 threads, 2^31=2GB table,
@@ -103,6 +118,7 @@ below is MEASURED from row timestamps by the analysis, vs. 50ms nominal.)
 TOTALS
 ------
   ~13.8M rows of per-page signal time series across 13 datasets
+  (4 synthetic incl. the UFFD/PEBS control pair, 9 real)
   (42 columns each: 10 base + 32 signal components)
   ~180,000 windowed state-change events feeding the reactivity analysis
   6 distinct real workloads from the mentor-provided repo + script:

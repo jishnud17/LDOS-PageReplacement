@@ -13,9 +13,9 @@ data/**/ml_dataset_*.csv
 tot_gups.txt
 
 # Datasets too large for GitHub's 100MB limit (xsbench 405MB, liblinear
-# 305MB gzipped).  Kept locally for analysis; regenerate with the commands
-# in results/workload_run_inventory.txt.  Their analysis outputs ARE tracked
-# under results/real_workloads/.
+# 305MB, gapbs_cc_kron -n 10 160MB, gzipped).  Kept locally for analysis;
+# regenerate with the commands in results/workload_run_inventory.txt.
+# Their analysis outputs ARE tracked under results/real_workloads/.
 data/large_local/
 
 # Editor / OS junk

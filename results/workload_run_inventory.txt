@@ -5,6 +5,23 @@ LDOS PageReplacement -- heuristics-analysis branch
 Updated: 2026-07-07
 ================================================================================
 
+DIRECTORY LAYOUT
+----------------
+Datasets and analysis outputs are grouped by workload:
+
+  data/synthetic_workloads/<workload>/     raw .csv.gz per run
+  data/real_workloads/<workload>/
+  data/large_local/<workload>/             raw .csv.gz too large for GitHub
+                                           (gitignored, local only)
+  results/synthetic_workloads/<workload>/  *_reactivity.csv, *_trajectories.csv
+  results/real_workloads/<workload>/
+
+  Workload folders: hot_cold, sequential, temporal (synthetic);
+  hot_cold_control, gups_hotset_move, gups_skewed, gapbs_pr_twitter,
+  gapbs_bc_twitter, gapbs_cc_kron, xsbench, liblinear (real).
+
+================================================================================
+
 SYNTHETIC WORKLOADS
 (full management: userfaultfd demand paging + write-protect counting + PEBS;
 CloudLab c220g2 Haswell.  Data in data/synthetic_workloads/, analysis in
@@ -95,11 +112,13 @@ TOTALS
   r650 (Ice Lake Platinum 8360Y) and sm110p (Ice Lake Xeon Silver 4314)
   -- load attribution verified working on both Ice Lake parts
 
-  NOTE ON DATA STORAGE: the XSBench (405MB) and liblinear (305MB) gzipped
-  datasets exceed GitHub's 100MB file limit and are kept locally under
-  data/large_local/ (gitignored).  Their analysis outputs ARE committed
-  under results/real_workloads/, and the exact run commands above
-  regenerate them.
+  NOTE ON DATA STORAGE: three gzipped datasets exceed GitHub's 100MB file
+  limit and are kept locally under data/large_local/<workload>/
+  (gitignored): xsbench (405MB), liblinear (305MB), and the gapbs_cc_kron
+  -n 10 rerun (160MB).  Their analysis outputs ARE committed under
+  results/real_workloads/<workload>/ where they exist, and the exact run
+  commands above regenerate the raw data.  The superseded gapbs_cc_kron
+  -n 2 dataset was removed (0 events; replaced by the -n 10 rerun).
 
 SUPERSEDED RUNS (collected, then replaced by better-configured reruns)
 ----------------------------------------------------------------------

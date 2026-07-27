@@ -60,10 +60,14 @@ below is MEASURED from row timestamps by the analysis, vs. 50ms nominal.)
   Twitter             the SAME twitter.sg;                              11 hot_to_cold
                       -n 1 -i 30, 16 threads.                           (small sample --
                       Frontier-based BFS access.                         see limitations)
-  gapbs cc_sv /       Connected Components on     106,566  3,644   112ms  NO EVENTS
-  kron                kron.sg (67,108,864 nodes,                        (run too short:
-                      1,051,923,236 edges),                              ~29 rows/page)
-                      -n 2, 16 threads
+  gapbs cc_sv /       Connected Components on   2,904,621  15,961  257ms  1,417 detected,
+  kron                kron.sg (67,108,864 nodes,                        0 scorable
+                      1,051,923,236 edges),                             (median per-page
+                      -n 10, 16 threads.  A first                        rate = 0.0; see
+                      -n 2 run gave 0 events;                            conclusions doc)
+                      this 27x rerun still not
+                      measurable -- sample density,
+                      not duration
   XSBench             Monte Carlo neutron       4,710,126  4,948   186ms  65,961 cold_to_hot
   (HPC, non-graph)    transport, H-M large:                             65,408 hot_to_cold
                       -g 130000 -p 20000000                             LARGEST event set

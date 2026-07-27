@@ -237,6 +237,18 @@ def analyze_file(path, args, accum):
 
     by_type = event_triggered(df, events, signal_cols, args.window, zmean, zstd)
 
+    if not by_type:
+        # Events were found, but every one sat too close to the start or end
+        # of its page's series to fit a full +-W window, so none could be
+        # scored.  Common when pages are admitted to tracking only once they
+        # go hot: the cold_to_hot transition then lands in the page's first
+        # few bars.  Report it rather than crashing in the writer below.
+        print(f"  {len(events)} events found, but none had a full "
+              f"+-{args.window}-bar window around them -- nothing to score.")
+        print("  (Pages likely enter the data already transitioning; try a "
+              "longer run, or --window smaller than the shortest lead-in.)")
+        return
+
     traj_rows = []
     for et, (nev, sig) in by_type.items():
         rows = []

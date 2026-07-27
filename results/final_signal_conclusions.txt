@@ -246,10 +246,22 @@ All telemetry-only, bounded tracking, load-attributed on Ice Lake.
   (random_walk_index_high and swing_index in the top 4 on both event types)
   but treated as suggestive, not evidence.
 
-  gapbs cc_sv / kron -- NO EVENTS DETECTED.  The run was too short (two ~7s
-  trials, ~29 rows per page), so no page accumulated enough bar history for
-  the detector's debounce + window requirements.  Same failure mode as the
-  original short gups-skewed run; fixable with -n 10 instead of -n 2.
+  gapbs cc_sv / kron -- NOT MEASURABLE by this method, and the reason is
+  worth stating because it bounds where the approach applies.  A first run
+  (-n 2) produced no events at all; a 27x longer rerun (-n 10, 2.9M rows,
+  15,961 pages, 182 bars/page) produced 1,417 detected cold_to_hot events,
+  but every one landed on the final bar of its page's series and so had no
+  window to score.  Root cause: the MEDIAN per-page access rate is 0.0.
+  Connected Components sweeps the whole 8.4GB kron graph near-uniformly, so
+  there is no concentrated hot set -- PEBS samples spread across ~2.9M
+  page-bars at roughly 0.14 samples per page-bar, leaving each page's rate
+  series almost entirely zeros with isolated spikes.  No sustained hot phase
+  exists to transition into or out of.
+  This is a SAMPLE-DENSITY limit, not a duration limit: more trials cannot
+  fix it (they admit more pages at the same thin spread).  It would need
+  either a smaller graph (concentrating activity onto fewer pages) or a
+  shorter PEBS sampling period.  The same arithmetic is why the lab
+  harness's 8GB-hot-set GUPS config is unsuitable for per-page signals.
 
   SIGNIFICANCE: random_walk_index_high is the top-ranked INDICATOR (the raw
   rate and its duplicate ichimoku_chikou are the underlying series, not

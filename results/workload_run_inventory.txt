@@ -53,8 +53,10 @@ results/synthetic_workloads/)
               only -- no userfaultfd.  Isolates
               the effect of the measurement switch
               from the effect of changing workload.
-              Caught system_quality_number as an
-              artifact (phase-1 top-3 -> ~0 here).
+              system_quality_number falls 2.34 ->
+              0.18 across this pair; NOTE that turned
+              out to be workload-specific, not a PEBS
+              artifact -- see final_signal_ranking.txt.
 
 REAL WORKLOADS
 (telemetry-only collection: LD_PRELOAD shim + PEBS hardware sampling on

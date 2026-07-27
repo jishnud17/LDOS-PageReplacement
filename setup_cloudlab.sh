@@ -10,6 +10,9 @@
 #     bash ~/LDOS-PageReplacement/setup_cloudlab.sh --twitter  # + the 12GB Twitter graph (pr, bc)
 #     bash ~/LDOS-PageReplacement/setup_cloudlab.sh --kron     # + kron graph (cc)
 #     bash ~/LDOS-PageReplacement/setup_cloudlab.sh --kddb     # + kddb dataset (liblinear)
+#
+# NOTE: a 63GB node partition fits all of the above only because the raw
+# Twitter sources are deleted after twitter.sg is built (see step 5).
 # Flags combine: --twitter --kron --kddb
 #
 # Typical fresh-node flow:
@@ -26,7 +29,7 @@ for arg in "$@"; do
     case "$arg" in
         --twitter) WANT_TWITTER=1 ;;
         --kron)    WANT_KRON=1 ;;     # kron graph for cc-twitter
-        --kddb)    WANT_KDDB=1 ;;     # kddb dataset for liblinear (~2.5GB download)
+        --kddb)    WANT_KDDB=1 ;;     # kddb dataset for liblinear (~510MB download)
         *) echo "unknown flag: $arg (valid: --twitter --kron --kddb)"; exit 1 ;;
     esac
 done
@@ -89,6 +92,14 @@ if [[ "$WANT_TWITTER" == "1" ]]; then
     say "5/5  generating Twitter graph (12GB .sg, downloads ~6GB, slow)"
     cd "$GAPBS_DIR"
     make gen-twitter
+    # The raw sources (4 compressed shards + the concatenated ~25GB edge
+    # list) are only inputs to the converter -- ~31GB of dead weight once
+    # twitter.sg exists, and enough to fill a 63GB node partition and break
+    # later steps (kddb bunzip2 hit ENOSPC this way).  Drop them.
+    if [[ -f benchmark/graphs/twitter.sg ]]; then
+        say "     twitter.sg built -- removing ~31GB of raw sources"
+        rm -rf benchmark/graphs/raw
+    fi
 else
     say "5/5  skipping Twitter graph (pass --twitter to build it)"
 fi
@@ -101,7 +112,7 @@ if [[ "$WANT_KRON" == "1" ]]; then
 fi
 
 if [[ "$WANT_KDDB" == "1" ]]; then
-    say "5c   downloading kddb dataset for liblinear (~2.5GB compressed)"
+    say "5c   downloading kddb dataset for liblinear (~510MB gz, ~5GB unpacked)"
     mkdir -p "$BENCH_DIR/inputs"
     if [[ ! -f "$BENCH_DIR/inputs/kddb" ]]; then
         wget -q --show-progress -O "$BENCH_DIR/inputs/kddb.bz2" \

@@ -5,9 +5,10 @@ LDOS PageReplacement -- heuristics-analysis branch
 Updated: 2026-07-07
 ================================================================================
 
-PHASE 1 -- SYNTHETIC WORKLOADS
+SYNTHETIC WORKLOADS
 (full management: userfaultfd demand paging + write-protect counting + PEBS;
-CloudLab c220g2 Haswell; data in data/phase1/, analysis in results/phase1/)
+CloudLab c220g2 Haswell.  Data in data/synthetic_workloads/, analysis in
+results/synthetic_workloads/)
 
   Workload    Configuration                              Rows      Events
   ----------  -----------------------------------------  --------  ----------------
@@ -21,12 +22,12 @@ CloudLab c220g2 Haswell; data in data/phase1/, analysis in results/phase1/)
               (10% of pages per region)                             1,059 hot_to_cold
                                                                     285 migrations
 
-VALIDATION -- REAL WORKLOADS + CONTROL
+REAL WORKLOADS (plus the synthetic control)
 (telemetry-only collection: LD_PRELOAD shim + PEBS hardware sampling on
 per-CPU events, all threads; bounded tracking LDOS_MIN_SAMPLES_TO_TRACK=3;
 hardware-timestamped inter-access gaps; no migrations.  Data in
-data/validation/, analysis in results/validation/.  Bar cadence below is
-MEASURED from row timestamps by the analysis, vs. 50ms nominal.)
+data/real_workloads/, analysis in results/real_workloads/.  Bar cadence
+below is MEASURED from row timestamps by the analysis, vs. 50ms nominal.)
 
   Dataset             Configuration                Rows     Pages   Bars   Events (windowed)
   ------------------  ---------------------------  -------  ------  -----  --------------------

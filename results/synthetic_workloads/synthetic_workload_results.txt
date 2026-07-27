@@ -1,5 +1,5 @@
 ================================================================================
-PHASE-1 SIGNAL REACTIVITY RESULTS
+SYNTHETIC WORKLOAD SIGNAL REACTIVITY RESULTS
 LDOS PageReplacement -- heuristics-analysis branch
 Generated: 2026-06-26
 ================================================================================

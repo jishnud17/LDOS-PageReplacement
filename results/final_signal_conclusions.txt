@@ -6,13 +6,18 @@ Generated: 2026-07-06
 ================================================================================
 
 Inputs:
-  results/phase1/...      3 synthetic workloads (hot_cold, sequential,
-                          temporal) under FULL management (userfaultfd +
-                          write-protect counting + PEBS).  Clean 50ms bars.
-  results/validation/...  hot_cold CONTROL rerun under telemetry-only
-                          collection (clean 50ms bars), and GUPS hotset-move
-                          (real HeMem benchmark; bars stretched to ~1.5s by
-                          the oversized 159K-page tracking table).
+  results/synthetic_workloads/
+      3 synthetic workloads (hot_cold, sequential, temporal) under FULL
+      management (userfaultfd + write-protect counting + PEBS).  Clean
+      50ms bars.
+  results/real_workloads/
+      hot_cold CONTROL rerun under telemetry-only collection, plus the
+      GUPS variants (HeMem benchmark) and GAPBS PageRank on Twitter.
+
+Evidence labels used in the rankings below:
+  SYN  = the 3 synthetic workloads (hot_cold, sequential, temporal)
+  CTL  = the synthetic control rerun under telemetry-only collection
+  GUPS = the replicated GUPS runs (hotset-move and skewed)
 
 Score = amplitude x consistency of the event-triggered average around
 hot<->cold transitions.
@@ -70,18 +75,18 @@ SIGNAL GLOSSARY (what each of the 19 signals measures)
     the CURRENT heuristic thresholds.
 
 ================================================================================
-RANKING A: SYNTHETIC EVIDENCE (phase-1 + telemetry control; clean 50ms bars)
+RANKING A: SYNTHETIC EVIDENCE (synthetic workloads + control; clean 50ms bars)
 ================================================================================
-Basis: scores on the three phase-1 workloads and the control rerun -- the
+Basis: scores on the three synthetic workloads and the control rerun -- the
 datasets where the signal clock held its designed 50ms cadence.
 
   GOOD
-   1. RANDOM WALK INDEX        #1 in all 3 P1 workloads (1.1-7.0); CTL top-5
+   1. RANDOM WALK INDEX        #1 in all 3 SYN workloads (1.1-7.0); CTL top-5
                                both events, rwi_low #1 hot_to_cold (1.64/0.96)
-   2. SWING INDEX              P1 top-3 everywhere; CTL #1 cold_to_hot
+   2. SWING INDEX              SYN top-3 everywhere; CTL #1 cold_to_hot
                                (2.20 sigma at 0.88)
    3. INTER-ACCESS INTERVAL    the only signal that ever LED transitions --
-                               P1 cold_to_hot lead of -100 to -250ms, score
+                               SYN cold_to_hot lead of -100 to -250ms, score
                                to 3.2 on temporal; uniquely predictive.
                                NOTE: its zero in CTL is not counted against
                                it here -- the telemetry collection mode
@@ -92,29 +97,29 @@ datasets where the signal clock held its designed 50ms cadence.
 
   POTENTIAL SUPPLEMENTARY
    4. RAVI                     CTL #2 hot_to_cold (1.57/0.96) but only mid in
-                               P1 -- one strong dataset, not two
-   5. PARABOLIC SAR            reliable coincident direction flag in P1+CTL
+                               SYN -- one strong dataset, not two
+   5. PARABOLIC SAR            reliable coincident direction flag in SYN+CTL
                                (0.75-1.11), never top-tier
-   6. SCHAFF TREND CYCLE       consistent in P1 (0.74-0.93) and CTL (0.95)
+   6. SCHAFF TREND CYCLE       consistent in SYN (0.74-0.93) and CTL (0.95)
                                but ALWAYS +50-150ms late -- confirmation only
    7. ACCUM SWING INDEX        good numbers (CTL 1.09/1.00) but duplicates #2
    8. DIRECTIONAL INDICATORS   minus_di best demotion detector after the top
-                               family in P1 (0.40-1.43); weak in CTL
+                               family in SYN (0.40-1.43); weak in CTL
    9. AROON                    middling everywhere (0.05-2.4, workload-
                                dependent)
-  10. RECENCY-WEIGHTED FREQ    near-zero P1; decent CTL (0.93/0.98, +100ms)
+  10. RECENCY-WEIGHTED FREQ    near-zero SYN; decent CTL (0.93/0.98, +100ms)
   11. HEAT SCORE               moderate everywhere (0.10-1.57); risks
                                re-learning the current heuristic
   12. ADX                      erratic at fine clock (0.04-0.23)
 
   USELESS
-  13. SQN                      P1 top-3 exposed as artifact: CTL 0.04 (PEBS
+  13. SQN                      SYN top-3 exposed as artifact: CTL 0.04 (PEBS
                                rate quantization inflates its std term)
   14. SUPERTREND               always the weaker twin of PSAR
-  15. VHF                      moderate P1, dead CTL (0.12) -- artifact suspect
+  15. VHF                      moderate SYN, dead CTL (0.12) -- artifact suspect
   16. GAPO                     weaker sibling of VHF; dead CTL (0.02)
   17. TRIX                     huge amplitude, 0.06-0.18 consistency -- noise
-  18. LINEAR REGRESSION        near-zero P1 AND CTL; window too long for 50ms
+  18. LINEAR REGRESSION        near-zero SYN AND CTL; window too long for 50ms
   19. ICHIMOKU                 near-zero across all five lines at fine clock
 
 ================================================================================
@@ -208,18 +213,18 @@ RANKING C: COMBINED FINAL (all evidence; the rerun resolved the A-vs-B split)
 ================================================================================
 Basis: with the bounded-tracking rerun, the synthetic and real-workload
 rankings now AGREE -- the volatility family tops both.  This final ranking
-therefore needs no clock-dependent hedging: it is supported by phase-1,
+therefore needs no clock-dependent hedging: it is supported by the synthetic runs,
 the control, and the replicated real-workload runs simultaneously.
 
   GOOD
    1. RANDOM WALK INDEX        (rwi_high + rwi_low)
                                #1 or top-3 in EVERY valid dataset in the
-                               study: P1 #1 everywhere, CTL top-5, and #1 on
+                               study: SYN #1 everywhere, CTL top-5, and #1 on
                                the replicated real-workload rerun (both
                                variants, both runs, consistency up to 1.00).
                                The unconditional keeper; use both windows.
    2. SWING INDEX              (swing_index)
-                               top-3 across P1, CTL, and the rerun (#2 on
+                               top-3 across SYN, CTL, and the rerun (#2 on
                                skewed at 0.92-0.99 consistency); the
                                per-bar-move complement to RWI's windowed view
    3. INTER-ACCESS INTERVAL    (inter_access_interval_ms)
@@ -291,7 +296,7 @@ FINAL CONCLUSIONS
    workload exactly as it topped the synthetics.  The coarse-clock
    champions collapsed on cue: ADX fell from 1.00/1.00 consistency to
    0.57, linear regression from #1 to a weak lagger -- both confirmed as
-   cadence artifacts.  The phase-1 signal hierarchy GENERALIZES to real
+   cadence artifacts.  The synthetic-workload signal hierarchy GENERALIZES to real
    workloads.
 
 2. Replication is excellent: r1/r2 agree to within a few percent on every

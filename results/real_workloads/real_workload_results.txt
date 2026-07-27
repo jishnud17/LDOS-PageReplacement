@@ -95,7 +95,7 @@ RANKINGS A: hot_cold CONTROL (90ms bars; n=416 hot_to_cold, 8 cold_to_hot)
     swing_index                                 1.83    1.00     -179ms  1.83
 
   KEY RESULT: with hardware-timestamped gaps, inter_access_interval_ms
-  LEADS cold_to_hot by ~-450ms at 4.3 sigma -- the phase-1 leading behavior
+  LEADS cold_to_hot by ~-450ms at 4.3 sigma -- the synthetic-workload leading behavior
   restored under production collection.  (n=8; treat as a demonstrated
   mechanism, not yet a statistically strong effect.)
 

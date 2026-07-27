@@ -6,8 +6,11 @@
 # has to be redone each session.  This script is idempotent -- safe to re-run.
 #
 # Usage (from anywhere on the node, after the manager repo is cloned):
-#     bash ~/LDOS-PageReplacement/setup_cloudlab.sh            # env + build, no graph download
-#     bash ~/LDOS-PageReplacement/setup_cloudlab.sh --twitter  # also download+build the 12GB Twitter graph
+#     bash ~/LDOS-PageReplacement/setup_cloudlab.sh            # env + build, no data downloads
+#     bash ~/LDOS-PageReplacement/setup_cloudlab.sh --twitter  # + the 12GB Twitter graph (pr, bc)
+#     bash ~/LDOS-PageReplacement/setup_cloudlab.sh --kron     # + kron graph (cc)
+#     bash ~/LDOS-PageReplacement/setup_cloudlab.sh --kddb     # + kddb dataset (liblinear)
+# Flags combine: --twitter --kron --kddb
 #
 # Typical fresh-node flow:
 #     git clone https://github.com/jishnud17/LDOS-PageReplacement.git
@@ -17,7 +20,16 @@
 set -euo pipefail
 
 WANT_TWITTER=0
-[[ "${1:-}" == "--twitter" ]] && WANT_TWITTER=1
+WANT_KRON=0
+WANT_KDDB=0
+for arg in "$@"; do
+    case "$arg" in
+        --twitter) WANT_TWITTER=1 ;;
+        --kron)    WANT_KRON=1 ;;     # kron graph for cc-twitter
+        --kddb)    WANT_KDDB=1 ;;     # kddb dataset for liblinear (~2.5GB download)
+        *) echo "unknown flag: $arg (valid: --twitter --kron --kddb)"; exit 1 ;;
+    esac
+done
 
 MANAGER_DIR="$HOME/LDOS-PageReplacement"
 BENCH_DIR="$HOME/benchmarks"
@@ -30,7 +42,7 @@ say() { printf '\n\033[1;36m[setup] %s\033[0m\n' "$*"; }
 # ---------------------------------------------------------------------------
 say "1/5  apt dependencies"
 sudo apt-get update -qq
-sudo apt-get install -y -qq build-essential git python3 python3-pip wget curl
+sudo apt-get install -y -qq build-essential git python3 python3-pip wget curl bzip2
 
 # ---------------------------------------------------------------------------
 say "2/5  build the tiered-memory manager"
@@ -59,6 +71,14 @@ fi
 make
 
 # ---------------------------------------------------------------------------
+say "3b/5  build XSBench + liblinear"
+cd "$WORKLOADS_DIR"
+git submodule update --init XSBench
+make -C XSBench/openmp-threading -s
+make -C liblinear-2.47 -s
+say "     built XSBench/openmp-threading/XSBench and liblinear-2.47/train"
+
+# ---------------------------------------------------------------------------
 say "4/5  kernel permissions for PEBS + userfaultfd"
 sudo sysctl -w kernel.perf_event_paranoid=-1
 sudo sysctl -w kernel.perf_cpu_time_max_percent=0
@@ -71,6 +91,23 @@ if [[ "$WANT_TWITTER" == "1" ]]; then
     make gen-twitter
 else
     say "5/5  skipping Twitter graph (pass --twitter to build it)"
+fi
+
+if [[ "$WANT_KRON" == "1" ]]; then
+    say "5b   generating kron graph for cc (scale 26, a few minutes)"
+    cd "$GAPBS_DIR"
+    [[ -f benchmark/graphs/kron.sg ]] || \
+        ./converter -g 26 -b benchmark/graphs/kron.sg
+fi
+
+if [[ "$WANT_KDDB" == "1" ]]; then
+    say "5c   downloading kddb dataset for liblinear (~2.5GB compressed)"
+    mkdir -p "$BENCH_DIR/inputs"
+    if [[ ! -f "$BENCH_DIR/inputs/kddb" ]]; then
+        wget -q --show-progress -O "$BENCH_DIR/inputs/kddb.bz2" \
+            "https://www.csie.ntu.edu.tw/~cjlin/libsvmtools/datasets/binary/kddb.bz2"
+        bunzip2 "$BENCH_DIR/inputs/kddb.bz2"
+    fi
 fi
 
 # ---------------------------------------------------------------------------

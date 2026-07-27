@@ -183,6 +183,28 @@ static void ensure_manager(void) {
     pthread_mutex_unlock(&mgr_lock);
 }
 
+/* Interpose threshold: allocations >= this many bytes get managed.
+ * Compile-time default LARGE_ALLOC_THRESHOLD (1GB); override with
+ * LDOS_INTERPOSE_MIN_BYTES (e.g. 134217728 = 128MB, matching the lab's ARMS
+ * harness) for workloads whose main arrays sit below 1GB (xsbench,
+ * liblinear).  Loaded lazily on first use; a benign race just re-reads the
+ * same value. */
+static size_t g_interpose_min = 0; /* 0 = not loaded yet */
+
+static size_t interpose_min(void) {
+    if (g_interpose_min == 0) {
+        size_t v = LARGE_ALLOC_THRESHOLD;
+        const char *s = getenv("LDOS_INTERPOSE_MIN_BYTES");
+        if (s != NULL) {
+            long long parsed = atoll(s);
+            if (parsed >= (1LL << 20)) /* sanity floor: 1MB */
+                v = (size_t)parsed;
+        }
+        g_interpose_min = v;
+    }
+    return g_interpose_min;
+}
+
 /* Allocate `size` bytes as an unpopulated private mapping and register it with
  * the manager.  Returns NULL if we should fall back to the real allocator. */
 static void *managed_alloc(size_t size) {
@@ -202,7 +224,7 @@ static void *managed_alloc(size_t size) {
 
 /* Decide + perform: manage if large enough and the manager is available. */
 static void *maybe_manage(size_t size) {
-    if (size < LARGE_ALLOC_THRESHOLD || in_mgr_init)
+    if (size < interpose_min() || in_mgr_init)
         return NULL;
     ensure_manager();
     if (!mgr_ready)
@@ -276,7 +298,7 @@ void free(void *ptr) {
 
 static int should_manage_mmap(size_t length, int flags, int fd) {
     (void)fd;
-    if (length < LARGE_ALLOC_THRESHOLD) return 0;
+    if (length < interpose_min()) return 0;
     if (!(flags & MAP_ANONYMOUS)) return 0;
     if (flags & MAP_PRIVATE) return 1;
     /* Shared anonymous mappings (e.g. GUPS's MAP_SHARED table) are safe to

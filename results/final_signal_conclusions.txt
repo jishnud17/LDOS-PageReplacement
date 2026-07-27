@@ -127,7 +127,9 @@ datasets where the signal clock held its designed 50ms cadence.
   19. ICHIMOKU                 near-zero across all five lines at fine clock
 
 ================================================================================
-RANKING B: REAL-WORKLOAD EVIDENCE (GUPS, bounded-tracking rerun; replicated x2)
+RANKING B: REAL-WORKLOAD EVIDENCE -- GUPS BASELINE (replicated x2)
+  (the other real workloads -- PageRank, BC, CC, XSBench, liblinear -- are
+   covered in the two ADDENDA that follow this ranking)
 ================================================================================
 Basis: the RERUN datasets -- gups-hotset-move x2 (n=741-765 events per type
 per run, ~200ms measured bars) and gups-skewed x2 (n=96-129, ~143ms bars) --
@@ -175,14 +177,19 @@ this table supersedes.
   16. TRIX                     dead
   17. VHF                      dead
   18. GAPO                     dead
-  19. INTER-ACCESS INTERVAL    ~0.003 on GUPS despite the timestamp path now
-                               WORKING (proven on the control: 4.3 sigma,
-                               -449ms lead).  Structural, not mechanical:
-                               GUPS relocates its hotset INSTANTANEOUSLY --
-                               a step function has no precursor, and indeed
-                               NO signal leads on GUPS (all coincident or
-                               lagging).  Leading signals require workloads
-                               with gradual warm-up.
+
+  NOT TESTABLE ON THIS WORKLOAD (scored last here, but NOT a failure --
+  do not read this as a negative result):
+
+      INTER-ACCESS INTERVAL    ~0.003 on GUPS.  The timestamp path WORKS
+                               (proven on the control: 4.3 sigma at -449ms).
+                               GUPS relocates its hotset INSTANTANEOUSLY, and
+                               a step transition has no precursor for ANY
+                               signal to detect -- indeed NOTHING leads on
+                               GUPS; every signal here is coincident or
+                               lagging.  This workload cannot test a leading
+                               signal, so its score here carries no evidence
+                               either way.  See Ranking C, where it is #3.
 
 ================================================================================
 RANKING B ADDENDUM: PAGERANK / TWITTER (read-dominant real workload, Ice Lake)

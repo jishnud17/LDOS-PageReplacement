@@ -1,0 +1,262 @@
+================================================================================
+FINAL SIGNAL RANKING -- ALL 19 SIGNALS
+LDOS PageReplacement -- heuristics-analysis branch
+Generated: 2026-07-27
+================================================================================
+
+One ranking, computed over EVERY dataset in the study (this supersedes the
+earlier three-ranking split by evidence source).
+
+HOW THE RANKING IS BUILT
+------------------------
+Per dataset and event type the analysis produces, for each signal:
+    amplitude   how far it moves around the transition (std-dev units)
+    consistency fraction of individual events moving the SAME direction
+    lead_lag_ms when it moves relative to t=0 (negative = leads)
+    score       amplitude x consistency
+
+Those 25 ranking tables (12 datasets x their event types) are then combined
+with four stated rules:
+
+  1. EXCLUDE NON-INDICATORS.  interval_access_rate (and its code-duplicate
+     ichimoku_chikou) IS the access rate -- the series events are defined
+     from.  It tops nearly every table by construction, which is circular,
+     so it is excluded from indicator ranking.  A phase-2 model may still
+     use the raw rate as an input.
+  2. CONSISTENCY FLOOR ~0.6.  Below that a signal points the wrong way too
+     often for amplitude to redeem it.
+  3. BREADTH OVER PEAK.  Placing top-5 in many tables beats a huge score in
+     one.  "top3"/"top5" below count tables out of 25.
+  4. REDUNDANCY PENALTY.  Signals carrying the same information as a
+     stronger sibling are demoted regardless of score -- the output is a
+     feature set, not a leaderboard.
+
+Evidence base: 12 datasets -- 3 synthetic (UFFD), 1 measurement control
+(same synthetic under PEBS), and 8 real-workload runs (GUPS x4 replicated,
+GAPBS PageRank, GAPBS BC, XSBench, liblinear).
+
+================================================================================
+THE RANKING
+================================================================================
+
+------------------------------------------------------------------- TIER 1 ----
+CORE FEATURES -- strong and consistent across nearly every dataset
+--------------------------------------------------------------------------------
+
+ 1. RANDOM WALK INDEX (HIGH)      random_walk_index_high
+    Compares how far the rate actually travelled over the window against
+    how far a random walk of the same volatility would.  High = real
+    directional move, not jitter.
+    EVIDENCE: top-3 in 21 of 25 tables, top-5 in 22.  Median consistency
+    0.98, median score 1.80 -- the highest of any indicator.  #1 on
+    synthetic (UFFD), on the PEBS control, and on real workloads spanning
+    graph sweeps (PageRank 2.63/0.98), HPC physics (XSBench 2.50/0.97) and
+    ML training (liblinear 4.79/0.96, and 2.68 at a perfect 1.00).
+    The single unconditional keeper in the study.
+
+ 2. SWING INDEX                   swing_index
+    Size of the current bar's move scaled by the bar's range -- a
+    normalised first derivative.  Reacts within one bar, no window to fill.
+    EVIDENCE: top-3 in 15 of 25 tables, top-5 in 21.  Median score 1.22 at
+    0.87 consistency.  Complements #1: instantaneous step size vs windowed
+    path.  Keep both; they are not redundant.
+
+ 3. RANDOM WALK INDEX (LOW)       random_walk_index_low
+    Same statistic over a shorter lookback.
+    EVIDENCE: top-3 in 11 of 25, top-5 in 15, median score 1.34 at 0.91.
+    Peaked at 3.59/3.57 with PERFECT 1.00 consistency on both replicate
+    runs of gups-skewed.  The short window catches sharp demotions the
+    long window smooths over -- worth carrying alongside #1.
+
+------------------------------------------------------------------- TIER 2 ----
+SITUATIONAL -- real signal, but conditional on workload or role
+--------------------------------------------------------------------------------
+
+ 4. SCHAFF TREND CYCLE            schaff_trend_cycle
+    Cycle detector on double-smoothed moving averages; needs several bars
+    to confirm.  Top-5 in 8 of 25, median score 0.69 at 0.82 consistency.
+    LAGS in EVERY dataset without exception (+1 to +2 bars).  Its role is
+    fixed: confirmation that a transition really happened, never prediction.
+
+ 5. SYSTEM QUALITY NUMBER         system_quality_number
+    Mean rate-change over the std of rate-changes.  Top-5 in 9 of 25,
+    median 0.92 consistency, median score 0.81.
+    *** CORRECTION TO EARLIER CONCLUSIONS ***  This signal was previously
+    dropped as a "PEBS quantization artifact", on the strength of a single
+    comparison: it fell from 2.34 on hot_cold under UFFD to 0.18 on the
+    same workload under PEBS.  The wider dataset does NOT support
+    generalising that.  Under PEBS it scores 1.45/1.36 at 1.00 consistency
+    on both gups-skewed replicates, 1.34 on PageRank, ~0.99 on XSBench and
+    liblinear.  The collapse is specific to hot_cold, not to PEBS.  Correct
+    verdict: VARIABLE, not artifactual -- genuinely strong on some
+    workloads, weak on others (gups-hotset-move 0.54-0.90 consistency).
+    Reinstated as situational rather than dropped.
+
+ 6. RECENCY-WEIGHTED FREQUENCY    recency_weighted_frequency
+    Access rate with exponential decay favouring recent bars.  Top-5 in 8
+    of 25 at a very high 0.98 median consistency -- but median amplitude
+    only 0.14.
+    Sharply split by measurement: essentially dead under UFFD (0.00-0.09)
+    and useful under PEBS (0.95-2.18 at 0.98-1.00), which fits -- it is a
+    smoother, and PEBS-sampled rates are the noisy ones.  Always LAGS.
+    A reliable confirmation input on sampled telemetry; redundant with the
+    raw rate if the rate is already a feature.
+
+ 7. PARABOLIC SAR DIRECTION       parabolic_sar_direction
+    +1/-1 flag for which side of a trailing trend level the rate sits on.
+    Top-5 in 5 of 25, but median consistency 0.67 -- close to the floor.
+    Cheap categorical direction input; never top-tier.
+
+ 8. INTER-ACCESS INTERVAL         inter_access_interval_ms
+    Mean time gap between consecutive accesses, from hardware PEBS
+    timestamps.  THE ONLY SIGNAL IN THE STUDY THAT HAS EVER LED A
+    TRANSITION -- and that remains its entire case.
+    Be precise about how narrow the evidence is: median score across all
+    25 tables is 0.08, near the bottom.  It is flat on most workloads.  It
+    spikes on exactly two: the PEBS control (4.29 sigma, -449ms lead) and
+    the synthetic temporal handoff (6.04 sigma, -100ms) -- both workloads
+    where pages warm up GRADUALLY.  On step-transition workloads (GUPS
+    relocates its hotset instantaneously) it is ~0.00 -- but so is every
+    other signal's lead there, because a step function has no precursor to
+    detect.  XSBench and liblinear likewise have no warm-up ramps.
+    VERDICT: keep, but as a conditional feature whose value depends on the
+    workload having gradual transitions -- not as a general-purpose signal.
+    Confirming it needs a warm-up-shaped real workload (memcached/redis
+    cache fill would be the natural test).
+
+------------------------------------------------------------------- TIER 3 ----
+NOT WORTH CARRYING -- redundant, weak, or measurement-dependent
+--------------------------------------------------------------------------------
+
+ 9. ACCUM SWING INDEX             cumulative sum of #2; near-identical
+                                  information (0.98 consistency but only
+                                  top-5 in 3 of 25).  Redundancy rule.
+10. RANGE ACTION VERIF. INDEX     top-5 in 3 of 25, median score 0.38.
+                                  Strong on the control only.
+11. INTER-ACCESS VARIANCE         noisier companion to #8; 0.65 consistency.
+12. VERTICAL HORIZONTAL FILTER    top-5 in 4 of 25 but median score 0.30.
+13. LINEAR REGRESSION (slope)     median score 0.29; window far too long for
+                                  these dynamics.  Its former #1 placing was
+                                  an artifact of a 30x-stretched clock.
+14. AVG DIRECTIONAL INDEX (ADX)   median consistency 0.61, at the floor.
+                                  Perfect 1.00 at broken cadence, 0.57 at
+                                  measured cadence -- the study's clearest
+                                  cadence artifact.
+15. DIRECTIONAL INDICATORS        plus_di/minus_di: never top-3 in any
+                                  table; absorbed by ADX + a direction flag.
+16. SUPERTREND (+ direction)      weaker twin of parabolic SAR throughout.
+17. AROON (up/down/oscillator)    median consistency 0.33-0.51 -- at or
+                                  below coin-flip.  Never top-5.
+18. TRIX                          the study's siren: large amplitudes with
+                                  0.62 median consistency and a 0.07 median
+                                  score.  Fires loudly, at random.
+19. ICHIMOKU (all lines) and      medians 0.03-0.13; too slow for 50ms
+    GAPO, HEAT SCORE,             dynamics.  heat_score additionally risks
+    PARABOLIC SAR (raw level)     re-learning the current heuristic, since
+                                  it is what that heuristic thresholds.
+
+================================================================================
+FEATURE LIST FOR PHASE-2
+================================================================================
+
+  CORE:          random_walk_index_high, random_walk_index_low, swing_index
+  CONFIRMATION:  schaff_trend_cycle
+  SITUATIONAL:   system_quality_number (strong on some workloads),
+                 recency_weighted_frequency (sampled telemetry only),
+                 parabolic_sar_direction (cheap direction flag)
+  CONDITIONAL:   inter_access_interval_ms -- the only leading signal, but
+                 only on workloads with gradual warm-up
+
+  19 signals in -> 3 core + 1 confirmation (+3 situational, 1 conditional).
+
+================================================================================
+APPENDIX: AGGREGATE EVIDENCE (all 25 ranking tables, raw rate excluded)
+================================================================================
+
+  signal                            top3 top5  med_amp med_cons med_score
+  --------------------------------------------------------------------------
+  random_walk_index_high             21   22     1.84    0.98     1.80
+  swing_index                        15   21     1.42    0.87     1.22
+  random_walk_index_low              11   15     1.51    0.91     1.34
+  system_quality_number               4    9     1.06    0.92     0.81
+  schaff_trend_cycle                  2    8     0.83    0.82     0.69
+  recency_weighted_frequency          6    8     0.14    0.98     0.09
+  parabolic_sar_direction             2    5     1.05    0.67     0.64
+  inter_access_variance_ms2           0    5     0.27    0.65     0.16
+  schaff_trend_cycle_signal           2    4     0.76    0.77     0.57
+  vertical_horizontal_filter          1    4     0.47    0.77     0.30
+  linear_reg_slope                    2    4     0.33    0.88     0.29
+  range_action_verification_index     2    3     0.52    0.72     0.38
+  accum_swing_index                   1    3     0.44    0.98     0.32
+  parabolic_sar                       0    3     0.20    0.69     0.18
+  inter_access_interval_ms            2    3     0.15    0.75     0.08
+  avg_directional_index               0    2     0.44    0.61     0.26
+  heat_score                          2    2     0.23    0.97     0.22
+  supertrend_direction                0    1     0.77    0.60     0.45
+  plus_directional_indicator          0    1     0.53    0.63     0.31
+  gopalakrishnan_range_index          1    1     0.28    0.50     0.13
+  triple_exp_rate_of_change           1    1     0.23    0.62     0.07
+  minus_directional_indicator         0    0     0.44    0.77     0.35
+  aroon_oscillator                    0    0     0.62    0.51     0.34
+  aroon_up                            0    0     0.46    0.49     0.24
+  ichimoku_tenkan                     0    0     0.19    0.66     0.13
+  ichimoku_senkou_a                   0    0     0.19    0.66     0.12
+  linear_reg_intercept                0    0     0.14    0.82     0.12
+  supertrend                          0    0     0.20    0.62     0.09
+  ichimoku_kijun                      0    0     0.17    0.41     0.07
+  ichimoku_senkou_b                   0    0     0.12    0.41     0.03
+  aroon_down                          0    0     0.12    0.33     0.02
+
+  top3/top5 = number of the 25 tables where the signal placed that high.
+  Medians are across all 25 tables, so a signal strong on a few datasets and
+  flat elsewhere shows a low median by design -- that is rule 3 at work.
+
+================================================================================
+CONCLUSIONS
+================================================================================
+
+1. RANDOM WALK INDEX IS THE RESULT.  Top-3 in 21 of 25 tables at 0.98
+   median consistency, holding across two measurement methods (UFFD and
+   PEBS), four hardware platforms, and five workload classes -- synthetic
+   patterns, random RMW updates, graph sweeps, HPC Monte Carlo, and ML
+   training.  Nothing else in the study is close to that breadth.
+
+2. SWING INDEX IS THE COMPLEMENT.  Second on breadth, and it measures a
+   different thing (single-bar step size vs windowed path), so the pair
+   covers both fast and sustained movement.
+
+3. LAGGING SIGNALS ARE STILL USEFUL, JUST NOT PREDICTIVE.  Schaff Trend
+   Cycle lags in every single dataset -- that consistency makes it a good
+   confirmation input and a bad forecaster.  Same for
+   recency_weighted_frequency.
+
+4. THE PREDICTIVE CLAIM IS REAL BUT NARROW.  inter_access_interval_ms is
+   the only signal that has ever moved BEFORE a transition (-449ms at 4.3
+   sigma).  It does so only where transitions ramp gradually; on
+   step-transition workloads nothing leads, itself included.  This is a
+   statement about workloads, not a defect in the signal -- but the
+   supporting evidence is 2 datasets out of 12 and should be described
+   that way.
+
+5. TWO EARLIER VERDICTS DID NOT SURVIVE THE FULL DATASET.
+   - system_quality_number was called a PEBS artifact on one workload
+     comparison; it is fine on most PEBS datasets and is better described
+     as variable.  Corrected above.
+   - ADX and linear regression were briefly top-ranked on a run whose
+     sampling clock had stretched ~30x; at measured cadence both collapse.
+     That verdict held.
+
+6. MEASUREMENT CAVEATS THAT BOUND ALL OF THE ABOVE.
+   - Bar cadence ran 1.8x-7.1x nominal on the real workloads (measured per
+     dataset by the analysis and reported in each run).  Sufficient to
+     separate fast from slow signals -- demonstrated by the smoothers
+     collapsing -- but lead/lag values are quantized to the measured bar.
+   - Large negative lead values equal to the window edge (-929, -1141,
+     -1785 ms) mean "no clean onset found", not "predicts that far ahead".
+   - Haswell-class PEBS attributes stores only; Ice Lake attributes both.
+   - gapbs cc_sv/kron is not measurable by this method at all (median
+     per-page rate 0.0 -- activity too thinly spread for per-page bars).
+
+================================================================================
+END OF REPORT
+================================================================================

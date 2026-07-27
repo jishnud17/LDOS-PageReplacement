@@ -6,7 +6,7 @@ Updated: 2026-07-07 (bounded-tracking rerun + PageRank/Twitter on Ice Lake)
 
 This report ranks the per-page signals using ONLY real-workload-round
 datasets (PEBS telemetry-only collection).  Cross-study comparison and the
-final feature list live in results/final_signal_conclusions.txt.
+final feature list live in results/final_signal_ranking.txt.
 
 SIGNAL GLOSSARY (what each metric measures, in access-rate terms)
 -----------------------------------------------------------------

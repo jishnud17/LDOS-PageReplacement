@@ -1,0 +1,259 @@
+================================================================================
+REAL-WORKLOAD SIGNAL RANKING -- ALL 19 SIGNALS, SYNTHETIC EXCLUDED
+LDOS PageReplacement -- heuristics-analysis branch
+Generated: 2026-07-30
+================================================================================
+
+final_signal_ranking.txt recomputed over REAL workloads only.  That document
+pools 25 tables, 11 of them synthetic -- hand-built access patterns measured
+with a different instrument (userfaultfd, every access counted) than the real
+runs (PEBS sampling).  This one drops them so the ranking rests only on real
+programs measured the way a deployed system would measure.  Neither supersedes
+the other; disagreements are listed at the end.
+
+EVIDENCE BASE:  8 real datasets -> 14 tables
+------------------------------------------------------------------------------
+  gups_hotset_move r1     cold_to_hot=741    hot_to_cold=765
+  gups_hotset_move r2     cold_to_hot=758    hot_to_cold=742
+  gups_skewed r1                             hot_to_cold=96
+  gups_skewed r2                             hot_to_cold=96
+  gapbs_pr_twitter        cold_to_hot=7809   hot_to_cold=7562
+  gapbs_bc_twitter        cold_to_hot=11     hot_to_cold=11
+  xsbench                 cold_to_hot=64679  hot_to_cold=64732
+  liblinear               cold_to_hot=8402   hot_to_cold=8424
+
+  gapbs_cc_kron contributes 0 tables (median per-page rate 0.0, nothing scorable).
+
+Rules, unchanged from the pooled ranking: exclude circular non-indicators
+(interval_access_rate and its code-duplicate ichimoku_chikou); consistency floor
+~0.6; breadth over peak; redundancy penalty.  Signals are grouped into the same
+19 families the pooled document used, and ordered by top-5 breadth, then by
+median score.  Per-signal numbers are in Appendix A.
+
+================================================================================
+THE RANKING -- ALL 19
+================================================================================
+
+------------------------------------------------------------------- TIER 1 ----
+ 1. RANDOM WALK INDEX (HIGH)      top5 12/14   amp 2.11  cons 0.97  score 1.85
+    Distance travelled vs. distance a same-volatility random walk would cover.
+    #1 outright on 6 of 8 datasets and slightly STRONGER without synthetic
+    (1.80 -> 1.85).  The unconditional keeper.
+
+ 2. RANDOM WALK INDEX (LOW)       top5 12/14   amp 1.61  cons 0.92  score 1.47
+    Same statistic, shorter lookback.  PROMOTED past swing_index.  Catches sharp
+    demotions the long window smooths over; #1 on both gups_skewed replicates.
+
+ 3. SWING INDEX                   top5 12/14   amp 1.34  cons 0.88  score 1.17
+    Current bar's move scaled by its range -- a one-bar derivative.  Demoted one
+    place but unchanged in absolute terms.  Complements #1: instantaneous step
+    vs. windowed path.  Also the only signal with a repeatable negative lead
+    (see LEAD/LAG below).
+
+ 4. RECENCY-WEIGHTED FREQUENCY    top5  8/14   amp 1.05  cons 0.99  score 1.05
+    Exponentially decayed access rate.  Pooled it scored 0.09 and ranked #6; on
+    real data it scores 1.05 at the highest consistency of any signal.  Reason:
+    it is a smoother, dead on UFFD data where there is no sampling noise to
+    smooth, and every UFFD table is synthetic.  Removing them removes exactly
+    the datasets where it cannot work.  Lags; partly redundant with the raw
+    rate -- use it as a denoised rate, not an independent feature.
+
+------------------------------------------------------------------- TIER 2 ----
+ 5. SCHAFF TREND CYCLE (+signal)  top5  5/14   amp 0.82  cons 0.82  score 0.67
+    Lags on every real dataset without exception.  Confirmation, never forecast.
+
+ 6. SYSTEM QUALITY NUMBER         top5  4/14   amp 0.96  cons 0.92  score 0.90
+    Never top-3, but top-5 on 4 datasets and a higher median score than #5 or
+    #7.  VARIABLE, not artifactual -- the 2.34 -> 0.18 collapse that once got it
+    dropped was specific to hot_cold, which is excluded here entirely.
+
+ 7. LINEAR REGRESSION (slope,     top5  4/14   amp 0.61  cons 0.94  score 0.52
+    intercept)
+    Both top-3 placings are gups_skewed r1/r2 (#2 at 2.96/3.35, 1.00
+    consistency).  Not a rehabilitation: the finding that its former #1 rank was
+    a 30x-stretched-clock artifact still holds.  Read as gups_skewed-specific.
+
+ 8. PARABOLIC SAR (direction,     top5  3/14   amp 1.07  cons 0.63  score 0.63
+    raw level)
+    Cheap categorical direction flag.  Places on xsbench and liblinear only.
+    Consistency 0.63, just above the floor.
+
+------------------------------------------------------------------- TIER 3 ----
+NOT WORTH CARRYING -- weak, redundant, or single-workload.
+
+ 9. AVG DIRECTIONAL INDEX (ADX)   top5  2/14   amp 0.56  cons 0.72  score 0.41
+    Top-5 on gups_skewed only.  The pooled document's cadence-artifact verdict
+    stands: 1.00 consistency at broken cadence, 0.72 at measured cadence.
+
+10. RANGE ACTION VERIF. INDEX     top5  2/14   amp 0.56  cons 0.72  score 0.39
+    Top-5 on gups_skewed and BC only -- the two thinnest datasets.
+
+11. DIRECTIONAL INDICATORS        top5  1/14   amp 0.76  cons 0.84  score 0.65
+    (plus_di / minus_di)          plus_di is respectable in isolation but never
+    top-3 anywhere; absorbed by #9 plus a direction flag.
+
+12. INTER-ACCESS VARIANCE         top5  1/14   amp 0.19  cons 0.65  score 0.13
+    Its one placing is gups_skewed.  Consistency at the floor.
+
+13. SUPERTREND (+direction)       top5  0/14   amp 0.93  cons 0.59  score 0.55
+    Weaker twin of #8 throughout.  Consistency 0.59 -- BELOW the 0.6 floor.
+
+14. ICHIMOKU (tenkan/kijun/       top5  0/14   amp 0.57  cons 0.69  score 0.35
+    senkou a/b), GAPO, HEAT SCORE (best member; kijun/senkou_b fall to 0.05-0.07)
+    Too slow for these dynamics.  heat_score additionally risks re-learning the
+    current heuristic, since it is what that heuristic thresholds.
+
+15. ACCUM SWING INDEX             top5  0/14   amp 0.28  cons 1.00  score 0.27
+    Cumulative sum of #3.  Perfect consistency, no independent information.
+    Redundancy rule.
+
+16. AROON (up/down/oscillator)    top5  0/14   amp 0.58  cons 0.48  score 0.27
+    Median consistency 0.48 -- at or below coin-flip.  Never top-5.
+
+17. VERTICAL HORIZONTAL FILTER    top5  0/14   amp 0.22  cons 0.64  score 0.12
+    Drops out entirely (was top-5 in 4 of 25 pooled); all its placings were
+    synthetic.
+
+18. INTER-ACCESS INTERVAL         top5  0/14   amp 0.04  cons 0.82  score 0.03
+    Pooled, this was #8 and "the only signal that has ever led a transition".
+    Both datasets supporting that -- the hot_cold PEBS control and the synthetic
+    temporal handoff -- are synthetic.  On real data it is 30th of 32 individual
+    signals.  Its leading behaviour has never been observed on a real workload;
+    testing it needs a warm-up-shaped one (memcached/redis cache fill).
+
+19. TRIPLE EXP RATE OF CHANGE     top5  0/14   amp 0.04  cons 0.63  score 0.03
+    (TRIX)                        Large amplitudes at 0.63 consistency in the
+    pooled data; on real data the amplitude goes too.  Fires loudly, at random.
+
+================================================================================
+LEAD/LAG ON REAL WORKLOADS
+================================================================================
+No signal leads a cold_to_hot transition on any real workload -- every top-5
+signal moves at t=0 or after.
+
+On hot_to_cold, swing_index shows a negative lead on 6 of the 8 datasets.  The
+values are uniform at exactly -2 bars once the measured cadence is divided out
+(BC -194ms, xsbench -372, hotset_move -400/-410, liblinear -457, PageRank -714;
+bar spacing 97/186/200/205/228/357ms respectively).  That uniformity across
+workloads with 3.7x different cadences is the signature of an analysis effect,
+not a workload one: event detection median-smooths the rate before thresholding,
+which places the event marker later than the raw rate change that swing_index
+reacts to.  Treat it as an artifact of the detector unless a run with --smooth 1
+reproduces it.
+
+Leads reported as exactly -5 bars are the window edge -- "no clean onset found",
+not a lead of that size.  The per-workload files print those as n/a.
+
+================================================================================
+FEATURE LIST FOR PHASE-2  (real-workload evidence only)
+================================================================================
+
+  CORE:          random_walk_index_high, random_walk_index_low, swing_index
+  DENOISED RATE: recency_weighted_frequency  (PEBS telemetry only; lags)
+  CONFIRMATION:  schaff_trend_cycle
+  SITUATIONAL:   system_quality_number, parabolic_sar_direction
+  DROPPED:       inter_access_interval_ms -- no real-workload support
+
+  Versus the pooled feature list: recency_weighted_frequency moves up into a
+  named role, inter_access_interval_ms comes out.  The three CORE features are
+  identical under both evidence bases.
+
+================================================================================
+APPENDIX A: PER-SIGNAL AGGREGATE, ALL 14 REAL TABLES
+================================================================================
+Individual columns, not families.  top3/top5 = tables out of 14.  Medians are
+across all 14, so a signal strong on one dataset and flat elsewhere shows a low
+median by design -- that is the breadth rule at work.
+
+  signal                            top3 top5  med_amp med_cons med_score
+  --------------------------------------------------------------------------
+  random_walk_index_high             12   12     2.11    0.97     1.85
+  random_walk_index_low              10   12     1.61    0.92     1.47
+  swing_index                         9   12     1.34    0.88     1.17
+  recency_weighted_frequency          6    8     1.05    0.99     1.05
+  linear_reg_slope                    2    4     0.61    0.94     0.52
+  schaff_trend_cycle                  1    5     0.82    0.82     0.67
+  parabolic_sar_direction             1    2     1.07    0.63     0.63
+  range_action_verification_index     1    2     0.56    0.72     0.39
+  system_quality_number               0    4     0.96    0.92     0.90
+  parabolic_sar                       0    3     0.77    0.71     0.59
+  schaff_trend_cycle_signal           0    2     0.74    0.76     0.51
+  avg_directional_index               0    2     0.56    0.72     0.41
+  plus_directional_indicator          0    1     0.76    0.84     0.65
+  inter_access_variance_ms2           0    1     0.19    0.65     0.13
+  supertrend_direction                0    0     0.93    0.59     0.55
+  linear_reg_intercept                0    0     0.62    0.84     0.55
+  supertrend                          0    0     0.62    0.68     0.42
+  minus_directional_indicator         0    0     0.45    0.82     0.39
+  ichimoku_tenkan                     0    0     0.57    0.69     0.35
+  aroon_oscillator                    0    0     0.58    0.48     0.27
+  accum_swing_index                   0    0     0.28    1.00     0.27
+  ichimoku_senkou_a                   0    0     0.41    0.67     0.25
+  heat_score                          0    0     0.22    0.99     0.22
+  aroon_up                            0    0     0.39    0.47     0.22
+  gopalakrishnan_range_index          0    0     0.20    0.51     0.13
+  vertical_horizontal_filter          0    0     0.22    0.64     0.12
+  ichimoku_kijun                      0    0     0.20    0.40     0.07
+  ichimoku_senkou_b                   0    0     0.18    0.29     0.05
+  inter_access_interval_ms            0    0     0.04    0.82     0.03
+  triple_exp_rate_of_change           0    0     0.04    0.63     0.03
+  aroon_down                          0    0     0.08    0.40     0.02
+  access_rate                         0    0     0.01    0.79     0.01
+
+================================================================================
+APPENDIX B: PER-WORKLOAD RANKINGS
+================================================================================
+Each dataset has its own ranking file next to its reactivity CSV -- full 32-signal
+ranking, per-event-type breakdown with lead/lag, and a note on how that dataset
+should and should not be read.
+
+  results/real_workloads/gups_hotset_move/gups_hotset_move_r1_ranking.txt
+  results/real_workloads/gups_hotset_move/gups_hotset_move_r2_ranking.txt
+  results/real_workloads/gups_skewed/gups_skewed_r1_ranking.txt
+  results/real_workloads/gups_skewed/gups_skewed_r2_ranking.txt
+  results/real_workloads/gapbs_pr_twitter/gapbs_pr_twitter_ranking.txt
+  results/real_workloads/gapbs_bc_twitter/gapbs_bc_twitter_ranking.txt
+  results/real_workloads/xsbench/xsbench_ranking.txt
+  results/real_workloads/liblinear/liblinear_ranking.txt
+
+Regenerate those and Appendix A with:  python3 rank_real_workloads.py
+
+  dataset                 #1 signal                 score   events
+  ----------------------  ------------------------  ------  -------
+  xsbench                 random_walk_index_high      1.85   129,411
+  liblinear               random_walk_index_high      3.64    16,826
+  gapbs_pr_twitter        random_walk_index_high      2.03    15,371
+  gups_hotset_move r1     random_walk_index_high      1.76     1,506
+  gups_hotset_move r2     random_walk_index_high      1.74     1,500
+  gups_skewed r1          random_walk_index_low       3.59        96
+  gups_skewed r2          random_walk_index_low       3.57        96
+  gapbs_bc_twitter        random_walk_index_high     17.08        22
+
+  rwi_high takes 6 of 8, including all four largest datasets.  The two it loses
+  are the gups_skewed replicates, where a static hot region means pages only
+  cool -- a clean monotonic decay almost any trend indicator detects.  BC's
+  17.08 is small-sample inflation off 11 events per type; ordering only.
+
+================================================================================
+APPENDIX C: DISAGREEMENTS WITH final_signal_ranking.txt
+================================================================================
+
+  1. recency_weighted_frequency  #6 (0.09) -> #4 (1.05).  Dead under UFFD, useful
+     under PEBS; all UFFD data is synthetic, so the pooled median averaged across
+     incompatible instruments.  The one change that alters the feature list.
+
+  2. inter_access_interval_ms  #8, "the only leading signal" -> #18, dropped.
+     Both supporting datasets are synthetic.
+
+  3. random_walk_index_low and swing_index swap #2/#3.  Both CORE either way.
+
+  4. linear_reg #13 -> #7 (gups_skewed-driven) and vertical_horizontal_filter
+     #12 -> #17 (its placings were synthetic).  Neither is substantive.
+
+  UNCHANGED: random_walk_index_high is #1 under both evidence bases, on both
+  instruments, on four hardware platforms, and on 6 of 8 individual real
+  workloads.  Dropping 11 of 25 tables does not move it.
+
+================================================================================
+END OF REPORT
+================================================================================

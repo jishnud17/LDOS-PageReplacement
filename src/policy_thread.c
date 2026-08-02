@@ -205,9 +205,36 @@ static int execute_migration(migration_decision_t *decision) {
  * POLICY THREAD
  *===========================================================================*/
 
+/* Export cadence in policy cycles.  SIGNAL_SAMPLE_MS/POLICY_INTERVAL_MS by
+ * default (5 cycles = 50 ms), overridable at runtime with
+ * LDOS_SIGNAL_SAMPLE_MS so a run can be collected at a coarser bar without
+ * recompiling.  Coarser bars are not merely a downgrade: at 50 ms nominal the
+ * thread cannot keep up once many pages are tracked, so the MEASURED cadence
+ * drifts per workload (143-357 ms across our real datasets) and becomes an
+ * uncontrolled variable across datasets.  Asking for a cadence the thread can
+ * actually hold makes it a controlled one. */
+static uint64_t g_export_every_cycles = SIGNAL_SAMPLE_MS / POLICY_INTERVAL_MS;
+
+static void policy_init_export_cadence(void) {
+  const char *e = getenv("LDOS_SIGNAL_SAMPLE_MS");
+  if (e != NULL) {
+    long ms = strtol(e, NULL, 10);
+    if (ms >= POLICY_INTERVAL_MS) {
+      g_export_every_cycles = (uint64_t)(ms / POLICY_INTERVAL_MS);
+    } else {
+      TM_ERROR("LDOS_SIGNAL_SAMPLE_MS=%s below POLICY_INTERVAL_MS=%d; ignoring",
+               e, POLICY_INTERVAL_MS);
+    }
+  }
+  TM_INFO("Signal export cadence: %llu cycles (%llu ms nominal)",
+          (unsigned long long)g_export_every_cycles,
+          (unsigned long long)(g_export_every_cycles * POLICY_INTERVAL_MS));
+}
+
 static void *policy_thread_loop(void *arg) {
   (void)arg;
   TM_INFO("Policy thread running (interval=%dms)", POLICY_INTERVAL_MS);
+  policy_init_export_cadence();
 
   struct timespec sleep_time = {.tv_sec = 0,
                                 .tv_nsec = POLICY_INTERVAL_MS * 1000000L};
@@ -260,9 +287,10 @@ static void *policy_thread_loop(void *arg) {
       pthread_rwlock_unlock(&g_manager.stats_lock);
     }
 
-    /* Update predictive signals then export, every 5 cycles (50ms).
+    /* Update predictive signals then export, every g_export_every_cycles
+     * cycles (50ms by default, see LDOS_SIGNAL_SAMPLE_MS).
      * One signal "bar" per export keeps the window cadence aligned to rows. */
-    if (cycles % 5 == 0) {
+    if (cycles % g_export_every_cycles == 0) {
         update_all_page_signals();
         export_page_stats_to_csv(cycles);
     }

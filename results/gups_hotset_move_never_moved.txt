@@ -1,0 +1,135 @@
+================================================================================
+FINDING: THE GUPS "HOTSET MOVE" NEVER HAPPENED
+LDOS PageReplacement -- heuristics-analysis branch
+Found: 2026-08-02, while building ground-truth relabeling (Track 1)
+================================================================================
+
+SUMMARY
+-------
+The gups_hotset_move r1/r2 datasets do NOT contain a hot-set relocation.  The
+benchmark relocates its hot set 150 seconds into the run; both of our runs
+ended at ~35 seconds.  The relocation code never executed.
+
+Consequence: gups_hotset_move and gups_skewed are the SAME workload behaviour
+(a static 90/10 skewed hot set).  Four of the eight real datasets are one
+configuration, not two, and the study currently has NO dataset containing a
+known, designed hot/cold transition.
+
+================================================================================
+EVIDENCE
+================================================================================
+
+1. THE SOURCE
+   benchmarks/workloads/gups_hemem/gups-hotset-move.c, timing_thread():
+
+       uint64_t tic = -1;
+       for (;;) {
+         tic++;
+         if (tic >= 150 && tic < 300) { move_hotset1 = true; ... }
+         if (tic >= 250)              { stop = true; }
+         sleep(1);
+       }
+
+   move_hotset1 flips at tic=150, i.e. 150 wall-clock seconds.  Nothing else
+   in the file sets it.  do_gups() only relocates indices when it is true.
+
+   NOTE: the run inventory describes this as "hot set RELOCATES at t=15s".
+   That is wrong on both counts -- the trigger is 150s, not 15s, and it never
+   fired.
+
+2. THE RUN DURATIONS (from row timestamps)
+       gups_hotset_move r1    35.4 s
+       gups_hotset_move r2    35.3 s
+       gups_skewed r1         24.7 s
+   The runs ended when the worker threads finished their iteration counts,
+   ~115 s before the relocation trigger.
+
+3. THE ADDRESS GEOMETRY  (the decisive test)
+   The source lays out, for 4 threads / 2^31 B table / 8 B elements /
+   2^19 B hot set:
+     - each thread owns a 512 MB slice; its hot set is the FIRST 128 KB of it
+     - so hot pages must appear as 4 clusters spaced exactly 512 MB apart
+     - after the move, elements [0,4096) shift up by hotsize, which would put
+       new hot pages at +128 KB..+160 KB inside each slice
+
+   Measured, top-48 pages by mean access rate (gups_hotset_move r1):
+     4 clusters, consecutive gaps 511.9 / 511.9 / 512.0 MB, each cluster
+     spanning 0.00-0.12 MB.  The predicted layout is confirmed exactly.
+
+   Activity by predicted region (r1, mean interval_access_rate):
+     region                                     pages   mean rate
+     pre-move-only hot   (0-32 KB)                 32     596,144
+     always hot          (32-128 KB)               96     749,007
+     POST-MOVE hot ONLY  (128-160 KB)               0         n/a
+     cold background     (>160 KB)               2,903         994
+
+   The post-move region has ZERO tracked pages -- it was never touched enough
+   to be admitted to tracking at all.  Same in r2 (0 pages) and, as expected,
+   in gups_skewed r1 (0 pages).
+
+4. EQUIVALENCE TO gups_skewed
+     dataset             duration   hot pages (0-128KB)   post-move pages
+     hotset_move r1        35.4 s        128                    0
+     hotset_move r2        35.3 s        128                    0
+     skewed r1             24.7 s        120                    0
+   Same geometry, same static hot set, no relocation in any of them.
+
+================================================================================
+WHAT THIS CHANGES
+================================================================================
+
+1. THE 1,506 EVENTS IN gups_hotset_move ARE NOT RELOCATION EVENTS.
+   They are threshold crossings on naturally fluctuating per-page rates:
+   hot pages dipping below 10% of their own peak under PEBS sampling noise,
+   and background pages transiently spiking above it.  They are real crossings
+   in the measured series -- the detector is not broken -- but they are not
+   the designed transition the dataset name implies.
+
+   Their timing confirms this: a relocation would put every event in one
+   narrow window.  Measured, events are spread roughly uniformly over the
+   first ~15 s and then stop:
+       cold_to_hot   255  262  255   19    0    0    0
+       hot_to_cold   237  265  235   30    0    1    0
+       bins (s)      0-5 5-10 10-15 15-20 ...
+
+2. A CLAIM IN THE WRITEUPS IS UNSUPPORTED.
+   final_signal_conclusions / project notes argue that "nothing leads GUPS
+   because instant hotset moves have no precursor".  There was no hotset move
+   to have a precursor.  Whatever those datasets show about lead/lag, it is
+   not about step transitions.
+
+3. WORKLOAD DIVERSITY IS OVERSTATED.
+   The study reports 6 distinct real workloads with GUPS contributing two
+   variants.  Behaviourally it contributed one.
+
+4. TRACK 1 (ground-truth relabeling) CANNOT RUN AS PLANNED.
+   There is no transition to relabel.
+
+================================================================================
+WHAT IS STILL POSSIBLE
+================================================================================
+
+GOOD NEWS: ground truth for hot-vs-cold CLASSIFICATION is exact and verified.
+Page temperature is decidable from address geometry alone, with no reference
+to any measured rate:
+
+    offset = (page_addr - region_base) mod 512MB
+    hot  <=>  offset < 128 KB
+
+That yields 128 hot pages and 2,903 cold pages in r1, and the two groups differ
+in mean access rate by ~750x.  So a NON-CIRCULAR test is available today:
+can each signal separate known-hot from known-cold pages?  That is a different
+question from "does it detect a transition", but it is fully independent of the
+rate-threshold labeling, which is what Track 1 was for.
+
+TO GET A REAL TRANSITION, a rerun is required.  Two options:
+  (a) run longer than 150 s (the stock trigger), or
+  (b) edit timing_thread()'s "tic >= 150" down to e.g. 15 and rerun.
+Option (b) is cheaper and gives a known, exact relocation timestamp -- the
+ideal Track 1 dataset.  Either way this is now the highest-value CloudLab run
+available, because it would produce the study's only dataset with a designed,
+externally-known hot/cold transition.
+
+================================================================================
+END
+================================================================================

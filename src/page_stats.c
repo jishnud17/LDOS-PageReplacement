@@ -176,6 +176,11 @@ void update_all_page_features(void) {
 
 #define SIG_EPS 1e-9
 
+/* Indicator lookback scaling, defined with the window-recomputed signals
+ * below.  Forward-declared because the recursive signals (TRIX) are
+ * defined earlier in the file but also need scaled periods. */
+static int sig_period(int base);
+
 /* Ordered-window helpers operate on v[0..n-1] with v[n-1] the most recent bar. */
 static double sig_max(const double *v, int start, int n) {
     double m = v[start];

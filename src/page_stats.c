@@ -252,7 +252,7 @@ static void sig_update_swing(page_signals_t *s, const double *v, int n) {
 
 /* (15) TRIX: rate-of-change of a triple-smoothed EMA of the rate series. */
 static void sig_update_trix(page_signals_t *s, double x) {
-    const double alpha = 2.0 / (15.0 + 1.0); /* 15-period EMA */
+    const double alpha = 2.0 / ((double)sig_period(15) + 1.0); /* 15-period EMA */
     if (!s->trix_init) {
         s->trix_ema1 = s->trix_ema2 = s->trix_ema3 = s->trix_prev_ema3 = x;
         s->trix_init = true;
@@ -342,9 +342,47 @@ static void sig_update_psar(page_signals_t *s, const double *v, int n) {
     s->psar_dir = s->psar_trend_up ? 1 : -1;
 }
 
+/*----------------------------------------------------------------------------
+ * WINDOW-LENGTH SCALING
+ *
+ * The lookback periods below (9/14/25/26/28/52 bars) are the textbook defaults
+ * these indicators carry from daily stock charts.  At a 50-350ms bar they span
+ * seconds to a minute -- 100-1000x slower than the hot/cold transitions being
+ * detected, which is the leading explanation for why the long-window signals
+ * (Aroon, Ichimoku, VHF, linreg) sit at the bottom of every ranking while the
+ * 1-bar and short-adaptive ones (swing_index, RWI) top it.  That is a claim
+ * about TUNING, not about the indicators being wrong in principle, and it is
+ * testable: scale every period by a constant and see which ones recover.
+ *
+ * LDOS_SIGNAL_WINDOW_SCALE=0.25 turns 25->6, 14->4, 52->13, etc.  Default 1.0
+ * reproduces the historical values exactly.  Floor of 2 bars; anything shorter
+ * is not a window.
+ *
+ * NOT scaled: STC (MACD 23/50 + two stochastics) and the recursive PSAR/
+ * Supertrend accelerators, whose multi-stage constants do not scale by a
+ * single factor in a meaningful way.  TRIX is scaled since it is one EMA
+ * length applied three times.
+ *--------------------------------------------------------------------------*/
+static double g_window_scale = 1.0;
+
+static int sig_period(int base) {
+    /* Lazy one-time init: only the policy thread computes signals. */
+    static bool inited = false;
+    if (!inited) {
+        const char *e = getenv("LDOS_SIGNAL_WINDOW_SCALE");
+        if (e != NULL) {
+            double v = atof(e);
+            if (v > 0.0) g_window_scale = v;
+        }
+        inited = true;
+    }
+    int p = (int)(base * g_window_scale + 0.5);
+    return (p < 2) ? 2 : p;
+}
+
 /* (13) Supertrend (period 10, multiplier 3) over the single rate series. */
 static void sig_update_supertrend(page_signals_t *s, const double *v, int n) {
-    const int period = 10;
+    const int period = sig_period(10);
     const double mult = 3.0;
     double price = v[n - 1];
     int start = (n > period) ? n - period : 1;
@@ -382,7 +420,8 @@ static void sig_update_supertrend(page_signals_t *s, const double *v, int n) {
 
 /* (3) Aroon up/down/oscillator over min(n,25) bars. */
 static void sig_compute_aroon(page_signals_t *s, const double *v, int n) {
-    int period = (n - 1 < 25) ? n - 1 : 25;
+    int pmax = sig_period(25);
+    int period = (n - 1 < pmax) ? n - 1 : pmax;
     if (period < 1) { s->aroon_up = s->aroon_down = s->aroon_osc = 0.0; return; }
     int start = n - 1 - period;
     int hi = sig_argmax(v, start, n);
@@ -418,7 +457,7 @@ static double sig_di_dx(const double *v, int end, int period,
  * bar; ADX is the average of DX over the most recent `period` bars (the
  * smoothing that distinguishes ADX from a raw DX reading). */
 static void sig_compute_adx(page_signals_t *s, const double *v, int n) {
-    const int period = 14;
+    const int period = sig_period(14);
     if (n < period + 1) { s->adx = s->plus_di = s->minus_di = 0.0; return; }
     /* Current +DI / -DI. */
     sig_di_dx(v, n - 1, period, &s->plus_di, &s->minus_di);
@@ -432,7 +471,8 @@ static void sig_compute_adx(page_signals_t *s, const double *v, int n) {
 
 /* (5) GAPO: log(range)/log(period) over min(n,14) bars. */
 static void sig_compute_gapo(page_signals_t *s, const double *v, int n) {
-    int period = (n < 14) ? n : 14;
+    int pmax = sig_period(14);
+    int period = (n < pmax) ? n : pmax;
     if (period < 2) { s->gapo = 0.0; return; }
     int start = n - period;
     double range = sig_max(v, start, n) - sig_min(v, start, n);
@@ -441,9 +481,10 @@ static void sig_compute_gapo(page_signals_t *s, const double *v, int n) {
 
 /* (6) Ichimoku Cloud components (tenkan 9, kijun 26, senkou-B 52). */
 static void sig_compute_ichimoku(page_signals_t *s, const double *v, int n) {
-    int p9 = (n < 9) ? n : 9;
-    int p26 = (n < 26) ? n : 26;
-    int p52 = (n < 52) ? n : 52;
+    int a = sig_period(9), b = sig_period(26), c = sig_period(52);
+    int p9 = (n < a) ? n : a;
+    int p26 = (n < b) ? n : b;
+    int p52 = (n < c) ? n : c;
     s->ich_tenkan = (sig_max(v, n - p9, n) + sig_min(v, n - p9, n)) / 2.0;
     s->ich_kijun = (sig_max(v, n - p26, n) + sig_min(v, n - p26, n)) / 2.0;
     s->ich_senkou_a = (s->ich_tenkan + s->ich_kijun) / 2.0;
@@ -453,7 +494,8 @@ static void sig_compute_ichimoku(page_signals_t *s, const double *v, int n) {
 
 /* (7) Linear regression slope/intercept over min(n,25) bars (x = bar index). */
 static void sig_compute_linreg(page_signals_t *s, const double *v, int n) {
-    int period = (n < 25) ? n : 25;
+    int pmax = sig_period(25);
+    int period = (n < pmax) ? n : pmax;
     if (period < 2) { s->linreg_slope = 0.0; s->linreg_intercept = v[n - 1]; return; }
     int start = n - period;
     double sx = 0, sy = 0, sxx = 0, sxy = 0;
@@ -469,7 +511,8 @@ static void sig_compute_linreg(page_signals_t *s, const double *v, int n) {
 
 /* (9) Random Walk Index over min(n,14) bars. */
 static void sig_compute_rwi(page_signals_t *s, const double *v, int n) {
-    int period = (n - 1 < 14) ? n - 1 : 14;
+    int pmax = sig_period(14);
+    int period = (n - 1 < pmax) ? n - 1 : pmax;
     if (period < 2) { s->rwi_high = s->rwi_low = 0.0; return; }
     double best_high = 0.0, best_low = 0.0;
     for (int k = 2; k <= period; k++) {
@@ -514,7 +557,8 @@ static void sig_compute_sqn(page_signals_t *s, const double *v, int n) {
 
 /* (16) VHF: directional range / total movement over min(n,28) bars. */
 static void sig_compute_vhf(page_signals_t *s, const double *v, int n) {
-    int period = (n < 28) ? n : 28;
+    int pmax = sig_period(28);
+    int period = (n < pmax) ? n : pmax;
     if (period < 2) { s->vhf = 0.0; return; }
     int start = n - period;
     double range = sig_max(v, start, n) - sig_min(v, start, n);

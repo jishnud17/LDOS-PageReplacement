@@ -104,14 +104,36 @@ def load_prepare(path):
     return df, signal_cols
 
 
-def detect_events(df, hot_frac, smooth_win, min_hot, debounce):
+def label_column_and_exclusions(label_by):
+    """
+    Which column defines events, and which columns must therefore be excluded
+    from the ranking as circular.
+
+    Events are defined by a column crossing a threshold, so THAT column and any
+    near-copy of it wins by construction -- it is restating the label, not
+    detecting it.  interval_access_rate has always been excluded for this
+    reason (ichimoku_chikou with it, being a code-duplicate).  The same trap
+    applies to latency-based labeling: if events come from
+    interval_latency_cycles, then the latency columns must be excluded, not
+    scored.  Getting this wrong reproduces exactly the circularity that
+    circularity_check.py was written to find.
+    """
+    if label_by == "latency":
+        return "interval_latency_cycles", {
+            "interval_latency_cycles", "mean_latency_cycles"}
+    return "interval_access_rate", {
+        "interval_access_rate", "ichimoku_chikou"}
+
+
+def detect_events(df, hot_frac, smooth_win, min_hot, debounce, rate_col=None):
     """
     Return a list of (row_index, event_type) tuples.
     Rate transitions are detected per page on a median-smoothed, per-page-normalized
     rate; migrations are detected from increases in migration_count.
     """
     events = []
-    rate_col = "interval_access_rate"
+    if rate_col is None:
+        rate_col = "interval_access_rate"
     for _, grp in df.groupby("page_addr", sort=False):
         idx = grp.index.to_numpy()
         n = len(idx)
@@ -215,10 +237,28 @@ def measure_cadence(df):
 def analyze_file(path, args, accum):
     name = os.path.splitext(os.path.basename(path))[0]
     df, signal_cols = load_prepare(path)
+
+    label_col, circular = label_column_and_exclusions(args.label_by)
+    if label_col not in df.columns:
+        print(f"\n{'='*70}\n{name}: --label-by={args.label_by} needs column "
+              f"'{label_col}', which this CSV does not have -- skipped.")
+        if args.label_by == "latency":
+            print("  (collect with LDOS_PEBS_LOAD_EVENT=0x1cd; the default "
+                  "ALL_LOADS event leaves PERF_SAMPLE_WEIGHT at 0)")
+        return
+    if args.label_by == "latency" and df[label_col].abs().max() <= 0:
+        print(f"\n{'='*70}\n{name}: '{label_col}' is all zero -- the run did "
+              f"not capture latency. Skipped rather than scored as noise.")
+        return
+
+    # Whatever defines the events cannot also be ranked against them.
+    signal_cols = [c for c in signal_cols if c not in circular]
+
     zmean = {c: df[c].mean() for c in signal_cols}
     zstd = {c: (df[c].std() or 1.0) for c in signal_cols}
 
-    events = detect_events(df, args.hot_frac, args.smooth, args.min_hot, args.debounce)
+    events = detect_events(df, args.hot_frac, args.smooth, args.min_hot,
+                           args.debounce, rate_col=label_col)
     counts = pd.Series([t for _, t in events]).value_counts().to_dict()
     print(f"\n{'='*70}\n{name}  ({len(df):,} rows, {df['page_addr'].nunique()} pages)")
 
@@ -313,6 +353,11 @@ def main():
     ap.add_argument("csvs", nargs="+", help="ml_dataset_*.csv files")
     ap.add_argument("--window", type=int, default=5,
                     help="half-window in 50ms steps around each event (default 5 = +-250ms)")
+    ap.add_argument("--label-by", choices=["rate", "latency"], default="rate",
+                    help="quantity whose threshold crossing DEFINES an event. "
+                         "'latency' needs CSVs collected with "
+                         "LDOS_PEBS_LOAD_EVENT=0x1cd; the labeling column and "
+                         "its siblings are auto-excluded from the ranking.")
     ap.add_argument("--hot-frac", type=float, default=0.10,
                     help="active threshold as fraction of a page's peak rate (default 0.10)")
     ap.add_argument("--min-hot", type=float, default=1e4,

@@ -168,6 +168,26 @@ for MS in 50 100 200 400; do
 done
 
 # --------------------------------------------------------------------------
+say "STEP 2b  indicator window-length sweep"
+echo "   Aroon(25) Ichimoku(9/26/52) VHF(28) linreg(25) RWI(14) carry textbook"
+echo "   daily-chart lookbacks.  At a 50-350ms bar those span seconds to a"
+echo "   minute -- 100-1000x slower than the transitions being detected, which"
+echo "   is the leading explanation for why the long-window signals sit at the"
+echo "   bottom of every ranking.  That is a claim about TUNING, and this tests"
+echo "   it: same workload, same cadence, only the window scale differs."
+
+for SC in 0.25 0.5; do
+    L="gups_move_w${SC/./p}"
+    echo "-- window scale ${SC} -> $L"
+    LDOS_SIGNAL_WINDOW_SCALE="$SC" LDOS_SIGNAL_SAMPLE_MS=200 \
+    GUPS_MOVE_AT_SEC="$MOVE_AT" \
+        collect "$L" "$GUPS" "$THREADS" "$UPDATES" "$EXPT" "$ELT" "$LOGHOT" "$HUGE"
+    grep -q LDOS_GROUNDTRUTH "$OUT/${L}.stderr" 2>/dev/null \
+        || warn "no relocation in $L"
+done
+echo "   compare against gups_move_c200 (same cadence, scale 1.0)"
+
+# --------------------------------------------------------------------------
 if [[ "$LAT_OK" == "1" ]]; then
     say "STEP 3  latency-labeled runs (0x1cd, coarse bars)"
     export LDOS_PEBS_LOAD_EVENT=0x1cd LDOS_PEBS_LAT_THRESHOLD=3

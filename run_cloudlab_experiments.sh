@@ -36,22 +36,26 @@
 #   (cycles per access, from PEBS weight) is a physically different measurement,
 #   so labeling hot/cold from it breaks the circularity.
 #
-#   THE CATCH, and why STEP 1 is a probe rather than an assumption: on Intel,
-#   PERF_SAMPLE_WEIGHT is only filled in by the load-latency facility (0x1cd).
-#   The default event here is 0x81d0 (ALL_LOADS), which does NOT populate it --
-#   so latency is 0 unless the event is switched.  And 0x1cd samples ~600x
-#   fewer loads; it already starved one Ice Lake run into an empty CSV (see the
-#   inventory's superseded-runs section).  Hence latency runs use 0x1cd paired
-#   with a MUCH coarser bar so each bar still contains samples.  If STEP 1
-#   reports zero latency, STEP 3 is skipped -- collecting it would be pointless.
+#   MEASURED ON r650 (2026-08-02), correcting the original assumption here:
+#   the DEFAULT event 0x81d0 DOES populate PERF_SAMPLE_WEIGHT on Ice Lake --
+#   33-71% of rows carried non-zero latency -- because adaptive PEBS can attach
+#   the memory-info group to any precise event.  The dedicated load-latency
+#   event 0x1cd gave 0.0% on GUPS: it samples far fewer LOADS and GUPS is
+#   store-dominated, so nearly nothing with a weight is captured.  It did work
+#   on XSBench (39%), which is load-heavy.  Latency runs therefore use the
+#   default event; LDOS_PEBS_LOAD_EVENT is kept for experimentation.
+#
+#   Latency capture is NOT fully reliable: gups_move_w0p5 read 0.0% while
+#   w0p25, identical apart from an unrelated window-scale setting, read 55.4%.
+#   Treat a zero-latency run as a collection failure to retry, not as evidence.
 #
 # ---------------------------------------------------------------------------
 # Usage:  bash run_cloudlab_experiments.sh [updates_per_thread] [move_at_sec]
 #
 set -uo pipefail
 
-UPDATES="${1:-1000000000}"
-MOVE_AT="${2:-12}"
+UPDATES="${1:-2500000000}"
+MOVE_AT="${2:-20}"
 
 MANAGER_DIR="$HOME/LDOS-PageReplacement"
 WORKLOADS="$HOME/benchmarks/workloads"
@@ -135,19 +139,24 @@ PY
 
 # --------------------------------------------------------------------------
 say "STEP 1  latency probe -- is PERF_SAMPLE_WEIGHT populated on this CPU?"
-echo "   short GUPS run, load-latency event 0x1cd, 1000ms bars"
-
-LDOS_PEBS_LOAD_EVENT=0x1cd LDOS_PEBS_LAT_THRESHOLD=3 LDOS_SIGNAL_SAMPLE_MS=1000 \
-    collect lat_probe "$GUPS" "$THREADS" 100000000 "$EXPT" "$ELT" "$LOGHOT" "$HUGE"
+echo "   short GUPS run, DEFAULT load event, 200ms bars"
+# Measured on r650: the default 0x81d0 populates weight on 33-71% of rows
+# (Ice Lake adaptive PEBS carries the memory-info group on any precise event),
+# while the dedicated load-latency event 0x1cd yielded 0.0% on GUPS -- it
+# samples far too few LOADS, and GUPS is store-dominated, so almost nothing
+# with a weight is captured.  0x1cd is therefore the wrong tool here despite
+# being the textbook answer.  Left switchable via LDOS_PEBS_LOAD_EVENT.
+LDOS_SIGNAL_SAMPLE_MS=200 \
+    collect lat_probe "$GUPS" "$THREADS" 200000000 "$EXPT" "$ELT" "$LOGHOT" "$HUGE"
 
 PROBE=$(latency_alive "$OUT/ml_dataset_lat_probe.csv")
 echo "   probe result: $PROBE"
 LAT_OK=0
 case "$PROBE" in
     ALIVE*) LAT_OK=1; echo "   latency IS captured -- STEP 3 will run" ;;
-    ZERO*)  warn "latency column is all zero with 0x1cd on this CPU." ;;
+    ZERO*)  warn "latency all zero -- capture is flaky; retry before concluding." ;;
     NOCOL*) warn "no latency column -- stale binary? rebuild the manager." ;;
-    *)      warn "probe produced no CSV (0x1cd may sample too little here)." ;;
+    *)      warn "probe produced no CSV." ;;
 esac
 [[ "$LAT_OK" == "1" ]] || warn "SKIPPING STEP 3.  Latency-labeled analysis is not possible on this hardware/config; report that as the finding rather than collecting zeros."
 
@@ -192,10 +201,9 @@ echo "   compare against gups_move_c200 (same cadence, scale 1.0)"
 
 # --------------------------------------------------------------------------
 if [[ "$LAT_OK" == "1" ]]; then
-    say "STEP 3  latency-labeled runs (0x1cd, coarse bars)"
-    export LDOS_PEBS_LOAD_EVENT=0x1cd LDOS_PEBS_LAT_THRESHOLD=3
-
-    for MS in 1000 2000; do
+    say "STEP 3  latency-labeled runs (default event)"
+    # Default event -- see STEP 1.  0x1cd produced 0.0% latency on GUPS.
+    for MS in 200 400; do
         L="gups_move_lat_c${MS}"
         echo "-- GUPS move, ${MS}ms -> $L"
         LDOS_SIGNAL_SAMPLE_MS="$MS" GUPS_MOVE_AT_SEC="$MOVE_AT" \
@@ -206,13 +214,12 @@ if [[ "$LAT_OK" == "1" ]]; then
 
     if [[ -x "$XSBENCH" ]]; then
         echo "-- XSBench, 1000ms -> xsbench_lat"
-        LDOS_SIGNAL_SAMPLE_MS=1000 \
+        LDOS_SIGNAL_SAMPLE_MS=400 \
             collect xsbench_lat "$XSBENCH" -g 130000 -p 20000000 -t 16
         echo "   latency: $(latency_alive "$OUT/ml_dataset_xsbench_lat.csv")"
     else
         warn "XSBench not built -- skipping (rerun setup_cloudlab.sh)"
     fi
-    unset LDOS_PEBS_LOAD_EVENT LDOS_PEBS_LAT_THRESHOLD
 fi
 
 # --------------------------------------------------------------------------

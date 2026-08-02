@@ -243,8 +243,9 @@ def analyze_file(path, args, accum):
         print(f"\n{'='*70}\n{name}: --label-by={args.label_by} needs column "
               f"'{label_col}', which this CSV does not have -- skipped.")
         if args.label_by == "latency":
-            print("  (collect with LDOS_PEBS_LOAD_EVENT=0x1cd; the default "
-                  "ALL_LOADS event leaves PERF_SAMPLE_WEIGHT at 0)")
+            print("  (measured on Ice Lake r650: the DEFAULT ALL_LOADS event "
+                  "populates PERF_SAMPLE_WEIGHT at 33-99%; 0x1cd starved "
+                  "store-heavy GUPS to zero rows -- recollect with defaults)")
         return
     if args.label_by == "latency" and df[label_col].abs().max() <= 0:
         print(f"\n{'='*70}\n{name}: '{label_col}' is all zero -- the run did "

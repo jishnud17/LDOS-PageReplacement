@@ -45,18 +45,11 @@
 #   on XSBench (39%), which is load-heavy.  Latency runs therefore use the
 #   default event; LDOS_PEBS_LOAD_EVENT is kept for experimentation.
 #
-#   WHERE TO PUT THE MOVE (measured on r650, 2.5e9 updates / ~70s runs):
-#   the tracked-page count does NOT saturate.  It climbs roughly LINEARLY at
-#   ~30 pages/s for the whole run -- 11 pages at 7s, 145 at 21s, 819 at 50s,
-#   1535 at 72s -- because background pages over a 2GB region keep being
-#   discovered.  So "wait for the curve to flatten" is not available; the move
-#   simply has to go as late as the post-move window allows.
-#
-#   With MOVE_AT=20 only 45-84 pages had the +-5 bars on BOTH sides that
-#   reactivity_analysis.py needs, out of ~1530 tracked.  Notably that count
-#   exactly equalled the number of scoreable pages among the 128 hottest: at
-#   20s the ONLY pages with pre-move history were hot ones, leaving no cold
-#   pages to act as negatives.  MOVE_AT is now 60 in a ~100s run.
+#   MOVE PLACEMENT: MOVE_AT=60 in a ~100s run.  (The earlier observation
+#   that tracked pages "never saturate" was an artifact of the divisor=128
+#   lattice -- see the divisor comment below; with divisor=1 hot pages are
+#   admitted within seconds.  60s is kept anyway: it costs little and
+#   guarantees a deep pre-move history plus plentiful background negatives.)
 #
 #   Latency capture is NOT fully reliable: gups_move_w0p5 read 0.0% while
 #   w0p25, identical apart from an unrelated window-scale setting, read 55.4%.
@@ -83,7 +76,17 @@ THREADS=4 EXPT=31 ELT=8 LOGHOT=19 HUGE=n
 # Common telemetry env for every run
 export LDOS_PEBS_TELEMETRY_ONLY=1
 export LDOS_MIN_SAMPLES_TO_TRACK=3
-export LDOS_PAGE_SAMPLE_DIVISOR=128
+# DIVISOR=1 matches the c220g2 originals (they bounded tracking with
+# MIN_SAMPLES_TO_TRACK, not the divisor -- their tracked pages are NOT
+# 512KB-aligned).  The first three r650 collections ran with divisor=128,
+# which tracks only pages where (vaddr>>12)%128==0: a 512KB lattice that
+# contains a hot page only if ASLR is kind (25% per run).  Verified against
+# the collected data: 100% of r650 tracked pages sat on the lattice, and in
+# the 3-of-8 runs whose base got lucky, the lattice hot pages were ranks
+# #1-4 of ~2,350 and collapsed exactly at move_ns.  Fallback if divisor=1
+# overloads the cadence: 8 (32KB lattice = 4 hot pages per slice,
+# deterministically, no coin flip).  preflight_gate.sh checks this.
+export LDOS_PAGE_SAMPLE_DIVISOR="${LDOS_PAGE_SAMPLE_DIVISOR:-1}"
 
 say() { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m   !! %s\033[0m\n' "$*"; }
@@ -93,7 +96,7 @@ mkdir -p "$OUT"
 # a leftover from an earlier parameterisation is indistinguishable from a
 # fresh one once copied back.  Two 0x1cd runs (lat_c1000/lat_c2000) survived
 # exactly this way and reappeared in a later summary as zero-latency results.
-rm -f "$OUT"/ml_dataset_*.csv "$OUT"/*.stderr
+[[ -z "${REPLICATE_TAG:-}" ]] && rm -f "$OUT"/ml_dataset_*.csv "$OUT"/*.stderr
 cd "$MANAGER_DIR"
 
 # --------------------------------------------------------------------------
@@ -120,9 +123,32 @@ echo "   manager built"
 
 [[ -x "$GUPS" ]] || { echo "missing $GUPS"; exit 1; }
 
+# --------------------------------------------------------------------------
+if [[ "${PREFLIGHT:-1}" == "1" ]]; then
+    say "STEP 0.5  preflight gate (~1 min; PREFLIGHT=0 skips)"
+    bash "$MANAGER_DIR/preflight_gate.sh" || {
+        echo "aborting the sweep: fix the preflight failure first."
+        exit 1
+    }
+fi
+
+# Provenance: enough to reconstruct WHAT ran WHERE -- the c220g2-vs-r650
+# confusion was only resolvable because the inventory recorded platforms.
+{
+    date; hostname; uname -r
+    lscpu 2>/dev/null | grep -E "Model name|Socket|Core|L3" || true
+    git -C "$MANAGER_DIR" rev-parse HEAD 2>/dev/null || true
+    env | grep -E "^LDOS_|^GUPS_" | sort
+    echo "--- gups move semantics (where the hot set goes at the move) ---"
+    grep -n -B2 -A8 "move_hotset1" \
+        "$WORKLOADS/gups_hemem/gups-hotset-move.c" 2>/dev/null || true
+} > "$OUT/provenance.txt" 2>&1
+
 # helper: run one collection.  $1=label  $2..=command
+# REPLICATE_TAG=_r2 appends to every dataset label so a second full pass
+# coexists with the first (compare with compare_replicates.py afterwards).
 collect() {
-    local label="$1"; shift
+    local label="$1${REPLICATE_TAG:-}"; shift
     LDOS_CSV_LABEL="$label" LD_PRELOAD=./lib/libmmap_shim.so \
         "$@" >"$OUT/${label}.stdout" 2>"$OUT/${label}.stderr" || true
     if [[ -f "ml_dataset_${label}.csv" ]]; then
@@ -266,6 +292,9 @@ CHECK BEFORE TRUSTING ANY OF THIS
      result the sweep exists to surface, not a failed run.
 
 THEN
+  python3 ~/LDOS-PageReplacement/inspect_runs.py
+  python3 ~/LDOS-PageReplacement/check_move_window.py
+  python3 ~/LDOS-PageReplacement/golden_profile_check.py $OUT/ml_dataset_gups_move*.csv
   gzip $OUT/*.csv
   and copy back into data/real_workloads/ (or data/large_local/ if >100MB)
 EOF

@@ -143,13 +143,19 @@ try:
         r = csv.DictReader(f)
         if "interval_latency_cycles" not in (r.fieldnames or []):
             print("NOCOL"); sys.exit()
-        n = 0
-        for i, row in enumerate(r):
-            if i > 200000: break
+        # Scan is capped for speed, so report a PERCENTAGE of what was
+        # scanned.  Printing the raw count instead made every fast-cadence
+        # run read "ALIVE 199xxx" -- the cap, not a property of the data --
+        # which looked like a hardware ceiling on weighted samples.
+        n = seen = 0
+        for row in r:
+            if seen >= 200000: break
+            seen += 1
             try:
                 if float(row["interval_latency_cycles"]) > 0: n += 1
             except (ValueError, TypeError): pass
-        print("ALIVE" if n else "ZERO", n)
+        pct = (100.0 * n / seen) if seen else 0.0
+        print("ALIVE" if n else "ZERO", f"{pct:.1f}% of {seen} rows scanned")
 except FileNotFoundError:
     print("NOFILE")
 PY

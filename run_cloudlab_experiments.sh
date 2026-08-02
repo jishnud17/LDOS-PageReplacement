@@ -75,7 +75,14 @@ THREADS=4 EXPT=31 ELT=8 LOGHOT=19 HUGE=n
 
 # Common telemetry env for every run
 export LDOS_PEBS_TELEMETRY_ONLY=1
-export LDOS_MIN_SAMPLES_TO_TRACK=3
+# Bound the tracked set by HEAT.  Measured on r650 c200: the sample-count
+# distribution has a cliff -- threshold 5 keeps 95,266 pages, threshold 10
+# keeps 718, and BOTH keep all 128 hot pages (background pages cluster at
+# 3-9 samples; hot pages carry ~30,000).  718 pages matches the c220g2
+# golden datasets (967-3,031) and restores the cadence that divisor=1
+# destroyed.  The originals used 3, which sufficed on Haswell because store
+# attribution saw ~3K pages; Ice Lake load attribution sees ~300K.
+export LDOS_MIN_SAMPLES_TO_TRACK="${LDOS_MIN_SAMPLES_TO_TRACK:-10}"
 # DIVISOR=1 matches the c220g2 originals (they bounded tracking with
 # MIN_SAMPLES_TO_TRACK, not the divisor -- their tracked pages are NOT
 # 512KB-aligned).  The first three r650 collections ran with divisor=128,

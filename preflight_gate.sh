@@ -11,6 +11,7 @@
 #   5. hottest page IS hot    (top page inside a hot window)
 #   6. data on both sides of the move
 #   7. latency captured       (>5% of rows non-zero)          [event bug]
+#   8. cadence held           (measured bar <=3x requested)    [overload bug]
 #
 # Called from run_cloudlab_experiments.sh (skip with PREFLIGHT=0); also runs
 # standalone.  Inherits the sweep's LDOS_* env, setting identical defaults
@@ -23,7 +24,7 @@ OUT="$MANAGER_DIR/preflight_out"
 THREADS=4 EXPT=31 ELT=8 LOGHOT=19 HUGE=n
 
 export LDOS_PEBS_TELEMETRY_ONLY="${LDOS_PEBS_TELEMETRY_ONLY:-1}"
-export LDOS_MIN_SAMPLES_TO_TRACK="${LDOS_MIN_SAMPLES_TO_TRACK:-3}"
+export LDOS_MIN_SAMPLES_TO_TRACK="${LDOS_MIN_SAMPLES_TO_TRACK:-10}"
 export LDOS_PAGE_SAMPLE_DIVISOR="${LDOS_PAGE_SAMPLE_DIVISOR:-1}"
 export LDOS_SIGNAL_SAMPLE_MS="${LDOS_SIGNAL_SAMPLE_MS:-200}"
 export GUPS_MOVE_AT_SEC=15
@@ -79,14 +80,17 @@ if not os.path.exists(csvp):
     check(False, "collection produced a CSV"); sys.exit(1)
 
 tot = defaultdict(float); rows = pre = post = lat = 0
+last = {}; gaps = []
 mv = int(mg.group(1)) if mg else None
 for r in csv.DictReader(open(csvp)):
     rows += 1
     a = int(r["page_addr"], 16)
     c = float(r["access_count"] or 0)
     if c > tot[a]: tot[a] = c
+    t = int(r["timestamp_ns"])
+    if a in last and t > last[a]: gaps.append(t - last[a])
+    last[a] = t
     if mv is not None:
-        t = int(r["timestamp_ns"])
         pre += t < mv; post += t >= mv
     lat += float(r.get("interval_latency_cycles") or 0) > 0
 
@@ -107,6 +111,18 @@ if mv is not None:
 if rows:
     check(lat / rows > 0.05,
           f"latency captured on {lat/rows*100:.0f}% of rows (need >5)")
+
+# The gate this collection needed and did not have: correct physics with a
+# broken clock.  ~300K tracked pages passed every other check while
+# stretching a 50ms request to 1,599ms, collapsing the whole cadence sweep
+# into one 1.6-4.9s band.
+if gaps:
+    gaps.sort()
+    bar = gaps[len(gaps)//2] / 1e6
+    req = float(os.environ.get("LDOS_SIGNAL_SAMPLE_MS", "200"))
+    check(bar <= 3 * req,
+          f"cadence held: {bar:.0f}ms measured vs {req:.0f}ms requested "
+          f"({bar/req:.1f}x, need <=3x) at {len(tot):,} tracked pages")
 
 sys.exit(1 if fails else 0)
 PY

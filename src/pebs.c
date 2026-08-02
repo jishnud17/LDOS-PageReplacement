@@ -415,9 +415,40 @@ int pebs_init(void) {
   TM_INFO("PEBS: opening events on %d CPUs (loads + stores)",
           pebs_state.ncpus);
 
+  /* Load-event selection.
+   *
+   * Default 0x81d0 (ALL_LOADS) gives full-rate sampling with correct DataLA on
+   * Skylake+, which is what per-page 50ms bars need.  But PERF_SAMPLE_WEIGHT --
+   * the per-access LATENCY in cycles -- is only filled in by the load-latency
+   * facility (0x1cd + a latency threshold in config1).  With ALL_LOADS the
+   * weight field is typically 0, so total_latency stays 0 and any
+   * latency-derived signal is meaningless.
+   *
+   * The two are mutually exclusive, and 0x1cd samples roughly 600x fewer loads
+   * (it starved an earlier Ice Lake run into an empty CSV -- see the run
+   * inventory's superseded-runs section).  So latency collection is opt-in and
+   * needs a MUCH coarser bar to have samples per bar: pair
+   *   LDOS_PEBS_LOAD_EVENT=0x1cd  with  LDOS_SIGNAL_SAMPLE_MS=1000 (or more).
+   * LDOS_PEBS_LAT_THRESHOLD sets the config1 latency threshold (default 3). */
+  __u64 load_event = PEBS_EVENT_MEM_LOADS;
+  __u64 load_config1 = 0;
+  {
+    const char *e = getenv("LDOS_PEBS_LOAD_EVENT");
+    if (e != NULL) {
+      load_event = (__u64)strtoull(e, NULL, 0);
+      const char *t = getenv("LDOS_PEBS_LAT_THRESHOLD");
+      load_config1 = (t != NULL) ? (__u64)strtoull(t, NULL, 0) : 3;
+      TM_INFO("PEBS: load event overridden to 0x%llx (config1/latency "
+              "threshold %llu) -- expect far fewer samples; pair with a "
+              "coarse LDOS_SIGNAL_SAMPLE_MS",
+              (unsigned long long)load_event,
+              (unsigned long long)load_config1);
+    }
+  }
+
   for (int c = 0; c < pebs_state.ncpus; c++) {
     /* Read sampling: load latency facility (guaranteed DataLA capture) */
-    if (setup_perf_event(PEBS_EVENT_MEM_LOADS, 0, 2,
+    if (setup_perf_event(load_event, load_config1, 2,
                          c, &pebs_state.perf_fd[PEBS_SAMPLE_READ][c],
                          &pebs_state.perf_page[PEBS_SAMPLE_READ][c]) < 0) {
       TM_ERROR("Failed to setup PEBS loads on cpu %d - PEBS may be unavailable", c);
@@ -699,6 +730,27 @@ void pebs_merge_with_page_stats(void) {
          * signal; supersedes the quantized lifetime span/count estimate. */
         if (rec->gap_ewma_ns > 0.0) {
           stats->pebs_gap_ewma_ms = rec->gap_ewma_ns / 1e6;
+        }
+
+        /* Per-access latency (cycles).  Stays 0 with the default ALL_LOADS
+         * event -- only the load-latency facility fills PERF_SAMPLE_WEIGHT.
+         * The interval value is the useful one: the lifetime mean barely
+         * moves once a page has run for a while, the same way access_rate
+         * (a lifetime average) is too smoothed to react to transitions. */
+        uint64_t lat_samples = pebs_reads + pebs_writes;
+        if (lat_samples > 0 && rec->total_latency > 0) {
+          stats->pebs_mean_latency_cycles =
+              (double)rec->total_latency / (double)lat_samples;
+
+          if (lat_samples > stats->pebs_last_total_samples &&
+              rec->total_latency >= stats->pebs_last_total_latency) {
+            uint64_t d_lat = rec->total_latency - stats->pebs_last_total_latency;
+            uint64_t d_smp = lat_samples - stats->pebs_last_total_samples;
+            stats->pebs_interval_latency_cycles =
+                (double)d_lat / (double)d_smp;
+          }
+          stats->pebs_last_total_latency = rec->total_latency;
+          stats->pebs_last_total_samples = lat_samples;
         }
       }
       rec = rec->next;

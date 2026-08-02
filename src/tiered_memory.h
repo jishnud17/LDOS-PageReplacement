@@ -164,7 +164,22 @@ typedef struct page_stats {
      * signal (proportional to true inter-access interval; constant factor
      * ~ sampling period). */
     double pebs_gap_ewma_ms;
-    
+
+    /* Per-access LATENCY in cycles, from PEBS PERF_SAMPLE_WEIGHT.  A
+     * physically DIFFERENT measurement from access frequency: how long each
+     * access took, not how many there were.  Exported so hot/cold can be
+     * labeled from something independent of interval_access_rate, which is
+     * what the rate-threshold event definition is built from.
+     *
+     * ZERO unless the load-latency facility is selected
+     * (LDOS_PEBS_LOAD_EVENT=0x1cd); the default ALL_LOADS event does not
+     * populate the weight field.  Always check these are non-zero before
+     * trusting any latency-derived result. */
+    double pebs_mean_latency_cycles;     /* lifetime mean over all samples */
+    double pebs_interval_latency_cycles; /* mean over the last merge interval */
+    uint64_t pebs_last_total_latency;    /* bookkeeping for the interval calc */
+    uint64_t pebs_last_total_samples;
+
     /* Placement state */
     memory_tier_t current_tier;
     uint64_t last_migration_ns;

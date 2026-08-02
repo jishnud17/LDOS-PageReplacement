@@ -76,6 +76,11 @@ say() { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m   !! %s\033[0m\n' "$*"; }
 
 mkdir -p "$OUT"
+# Clear stale CSVs: the run set changes between revisions of this script, and
+# a leftover from an earlier parameterisation is indistinguishable from a
+# fresh one once copied back.  Two 0x1cd runs (lat_c1000/lat_c2000) survived
+# exactly this way and reappeared in a later summary as zero-latency results.
+rm -f "$OUT"/ml_dataset_*.csv "$OUT"/*.stderr
 cd "$MANAGER_DIR"
 
 # --------------------------------------------------------------------------
@@ -213,7 +218,7 @@ if [[ "$LAT_OK" == "1" ]]; then
     done
 
     if [[ -x "$XSBENCH" ]]; then
-        echo "-- XSBench, 1000ms -> xsbench_lat"
+        echo "-- XSBench, 400ms -> xsbench_lat"
         LDOS_SIGNAL_SAMPLE_MS=400 \
             collect xsbench_lat "$XSBENCH" -g 130000 -p 20000000 -t 16
         echo "   latency: $(latency_alive "$OUT/ml_dataset_xsbench_lat.csv")"

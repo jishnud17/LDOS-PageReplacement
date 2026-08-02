@@ -45,6 +45,19 @@
 #   on XSBench (39%), which is load-heavy.  Latency runs therefore use the
 #   default event; LDOS_PEBS_LOAD_EVENT is kept for experimentation.
 #
+#   WHERE TO PUT THE MOVE (measured on r650, 2.5e9 updates / ~70s runs):
+#   the tracked-page count does NOT saturate.  It climbs roughly LINEARLY at
+#   ~30 pages/s for the whole run -- 11 pages at 7s, 145 at 21s, 819 at 50s,
+#   1535 at 72s -- because background pages over a 2GB region keep being
+#   discovered.  So "wait for the curve to flatten" is not available; the move
+#   simply has to go as late as the post-move window allows.
+#
+#   With MOVE_AT=20 only 45-84 pages had the +-5 bars on BOTH sides that
+#   reactivity_analysis.py needs, out of ~1530 tracked.  Notably that count
+#   exactly equalled the number of scoreable pages among the 128 hottest: at
+#   20s the ONLY pages with pre-move history were hot ones, leaving no cold
+#   pages to act as negatives.  MOVE_AT is now 60 in a ~100s run.
+#
 #   Latency capture is NOT fully reliable: gups_move_w0p5 read 0.0% while
 #   w0p25, identical apart from an unrelated window-scale setting, read 55.4%.
 #   Treat a zero-latency run as a collection failure to retry, not as evidence.
@@ -54,8 +67,8 @@
 #
 set -uo pipefail
 
-UPDATES="${1:-2500000000}"
-MOVE_AT="${2:-20}"
+UPDATES="${1:-3500000000}"
+MOVE_AT="${2:-60}"
 
 MANAGER_DIR="$HOME/LDOS-PageReplacement"
 WORKLOADS="$HOME/benchmarks/workloads"

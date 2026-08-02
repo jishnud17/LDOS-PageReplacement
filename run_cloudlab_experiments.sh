@@ -103,7 +103,13 @@ mkdir -p "$OUT"
 # a leftover from an earlier parameterisation is indistinguishable from a
 # fresh one once copied back.  Two 0x1cd runs (lat_c1000/lat_c2000) survived
 # exactly this way and reappeared in a later summary as zero-latency results.
-[[ -z "${REPLICATE_TAG:-}" ]] && rm -f "$OUT"/ml_dataset_*.csv "$OUT"/*.stderr
+# Also clears *.csv.gz: the archives from a previous collection survive an
+# uncompressed-CSV wipe, and gzip then prompts "already exists" per file at
+# the very end of a 17-minute run.  Answer 'n' to any of those and a stale
+# archive from an older parameterisation gets copied back as if it were
+# fresh -- the same trap the lat_c1000/lat_c2000 leftovers set earlier.
+[[ -z "${REPLICATE_TAG:-}" ]] && rm -f "$OUT"/ml_dataset_*.csv \
+    "$OUT"/ml_dataset_*.csv.gz "$OUT"/*.stderr
 cd "$MANAGER_DIR"
 
 # --------------------------------------------------------------------------

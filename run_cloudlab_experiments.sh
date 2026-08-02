@@ -58,7 +58,7 @@ WORKLOADS="$HOME/benchmarks/workloads"
 GUPS="$WORKLOADS/gups_hemem/gups-hotset-move"
 XSBENCH="$WORKLOADS/XSBench/openmp-threading/XSBench"
 OUT="$MANAGER_DIR/cloudlab_out"
-PATCH="$MANAGER_DIR/patches/gups-hotset-move-configurable.diff"
+PATCH="$MANAGER_DIR/patches/patch_gups.py"
 
 # Geometry matching the original runs: 4 threads, 2^31 B, 8 B elts, 2^19 hot
 THREADS=4 EXPT=31 ELT=8 LOGHOT=19 HUGE=n
@@ -78,16 +78,19 @@ cd "$MANAGER_DIR"
 say "STEP 0  patch + build"
 
 if [[ -f "$PATCH" ]]; then
-    pushd "$WORKLOADS/gups_hemem" >/dev/null
-    if git apply --check "$PATCH" 2>/dev/null; then
-        git apply "$PATCH" && echo "   applied gups patch"
-    else
-        echo "   gups patch already applied (or not applicable) -- skipping"
+    # String-replacement patcher, not a unified diff: diffs depend on exact
+    # line numbers and context, and the earlier hand-written .diff was corrupt.
+    # This verifies every edit landed and is idempotent.  It exits non-zero if
+    # the upstream file differs from what it expects -- do NOT continue past
+    # that, because an unpatched binary silently yields another no-move dataset.
+    if ! python3 "$PATCH" "$WORKLOADS/gups_hemem/gups-hotset-move.c"; then
+        echo "GUPS patch FAILED -- aborting rather than collecting a"
+        echo "dataset whose hot set never moves."
+        exit 1
     fi
-    make >/dev/null 2>&1 || warn "gups make reported errors"
-    popd >/dev/null
+    make -C "$WORKLOADS/gups_hemem" >/dev/null 2>&1 || warn "gups make reported errors"
 else
-    warn "no patch at $PATCH"
+    warn "no patcher at $PATCH"; exit 1
 fi
 
 make >/dev/null 2>&1 || { echo "manager build FAILED -- run 'make' to see errors"; exit 1; }

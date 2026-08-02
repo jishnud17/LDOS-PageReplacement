@@ -6,14 +6,17 @@ Reports, per dataset: duration, pages, MEASURED cadence vs requested, how much
 data sits on each side of the ground-truth relocation, and whether the latency
 columns actually carry values.
 
-Run on the CloudLab node right after run_cloudlab_experiments.sh:
-    python3 ~/LDOS-PageReplacement/inspect_runs.py ~/LDOS-PageReplacement/cloudlab_out
+stdlib only -- CloudLab nodes do not have pandas by default, and this needs to
+run on the node right after collection, before anything is copied back.
+
+    python3 ~/LDOS-PageReplacement/inspect_runs.py [outdir]
 """
 import os
 import re
 import sys
+import csv
 import glob
-import pandas as pd
+import statistics
 
 
 def move_ns_of(stderr_path):
@@ -26,74 +29,115 @@ def move_ns_of(stderr_path):
     return int(m.group(1)) if m else None
 
 
-def requested_cadence(name):
-    m = re.search(r"_c(\d+)", name)
-    return int(m.group(1)) if m else None
+def fnum(s):
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        return None
+
+
+def scan(path):
+    """One pass over the CSV, collecting only what the report needs."""
+    ts_min = ts_max = None
+    pages = set()
+    last_ts = {}          # page -> previous timestamp, for per-page bar gaps
+    gaps = []
+    rows = 0
+    lat_i = lat_m = 0
+    has_i = has_m = False
+    ts_all = []
+
+    with open(path, newline="") as fh:
+        r = csv.DictReader(fh)
+        cols = r.fieldnames or []
+        has_i = "interval_latency_cycles" in cols
+        has_m = "mean_latency_cycles" in cols
+        for row in r:
+            t = fnum(row.get("timestamp_ns"))
+            if t is None:
+                continue
+            rows += 1
+            ts_all.append(t)
+            ts_min = t if ts_min is None or t < ts_min else ts_min
+            ts_max = t if ts_max is None or t > ts_max else ts_max
+            p = row.get("page_addr")
+            pages.add(p)
+            if p in last_ts and t > last_ts[p]:
+                gaps.append(t - last_ts[p])
+            last_ts[p] = t
+            if has_i and (fnum(row.get("interval_latency_cycles")) or 0) > 0:
+                lat_i += 1
+            if has_m and (fnum(row.get("mean_latency_cycles")) or 0) > 0:
+                lat_m += 1
+
+    return dict(rows=rows, ts_min=ts_min, ts_max=ts_max, pages=len(pages),
+                gaps=gaps, lat_i=lat_i, lat_m=lat_m,
+                has_i=has_i, has_m=has_m, ts_all=ts_all)
 
 
 def main(outdir):
-    rows = []
+    out = []
     for f in sorted(glob.glob(os.path.join(outdir, "ml_dataset_*.csv"))):
         name = os.path.basename(f)[len("ml_dataset_"):-len(".csv")]
         try:
-            d = pd.read_csv(f)
+            s = scan(f)
         except Exception as e:
             print(f"{name}: unreadable ({e})")
             continue
-        if not len(d) or "timestamp_ns" not in d:
+        if not s["rows"]:
             print(f"{name}: empty")
             continue
 
-        t0, t1 = d.timestamp_ns.min(), d.timestamp_ns.max()
-        dur = (t1 - t0) / 1e9
-        pages = d.page_addr.nunique()
-        # measured bar = median per-page consecutive-row gap
-        dt = d.sort_values(["page_addr", "cycle"]).groupby(
-            "page_addr", sort=False).timestamp_ns.diff().dropna()
-        bar = dt.median() / 1e6 if len(dt) else float("nan")
+        dur = (s["ts_max"] - s["ts_min"]) / 1e9
+        bar = statistics.median(s["gaps"]) / 1e6 if s["gaps"] else float("nan")
+
+        req = None
+        m = re.search(r"_c(\d+)", name)
+        if m:
+            req = int(m.group(1))
+        stretch = f"{bar/req:.1f}x" if req and bar == bar else "-"
 
         mv = move_ns_of(os.path.join(outdir, f"{name}.stderr"))
-        if mv is not None and t0 <= mv <= t1:
-            pre = int((d.timestamp_ns < mv).sum())
-            post = int((d.timestamp_ns >= mv).sum())
-            split = f"{pre:,} / {post:,}"
-            mv_s = f"{(mv - t0)/1e9:.1f}s"
+        if mv is not None and s["ts_min"] <= mv <= s["ts_max"]:
+            pre = sum(1 for t in s["ts_all"] if t < mv)
+            split = f"{pre:,} / {s['rows']-pre:,}"
+            mv_s = f"{(mv - s['ts_min'])/1e9:.1f}s"
         elif mv is not None:
-            split = "MOVE OUTSIDE DATA"
-            mv_s = f"{(mv - t0)/1e9:+.1f}s"
+            split = "*** MOVE OUTSIDE DATA ***"
+            mv_s = f"{(mv - s['ts_min'])/1e9:+.1f}s"
         else:
             split, mv_s = "no move logged", "-"
 
-        lat_i = lat_m = "n/a"
-        if "interval_latency_cycles" in d:
-            lat_i = f"{(d.interval_latency_cycles > 0).mean()*100:.1f}%"
-        if "mean_latency_cycles" in d:
-            lat_m = f"{(d.mean_latency_cycles > 0).mean()*100:.1f}%"
+        li = f"{100.0*s['lat_i']/s['rows']:.1f}%" if s["has_i"] else "n/a"
+        lm = f"{100.0*s['lat_m']/s['rows']:.1f}%" if s["has_m"] else "n/a"
 
-        req = requested_cadence(name)
-        stretch = f"{bar/req:.1f}x" if req else "-"
-        rows.append((name, f"{dur:.1f}s", f"{pages:,}", f"{bar:.0f}ms",
-                     stretch, mv_s, split, lat_i, lat_m))
+        out.append((name, f"{dur:.1f}s", f"{s['rows']:,}", f"{s['pages']:,}",
+                    f"{bar:.0f}ms", stretch, mv_s, split, li, lm))
 
-    hdr = ("dataset", "dur", "pages", "bar", "vs req", "move@",
-           "rows pre/post move", "lat_int>0", "lat_mean>0")
-    w = [max(len(str(r[i])) for r in rows + [hdr]) for i in range(len(hdr))]
+    if not out:
+        print(f"no ml_dataset_*.csv under {outdir}")
+        return
+
+    hdr = ("dataset", "dur", "rows", "pages", "bar", "vs req", "move@",
+           "rows pre/post", "lat_int>0", "lat_mean>0")
+    w = [max(len(str(r[i])) for r in out + [hdr]) for i in range(len(hdr))]
     line = "  ".join(h.ljust(w[i]) for i, h in enumerate(hdr))
     print(line)
     print("-" * len(line))
-    for r in rows:
+    for r in out:
         print("  ".join(str(c).ljust(w[i]) for i, c in enumerate(r)))
 
     print("""
 WHAT TO LOOK FOR
-  bar / vs req   'vs req' near 1.0x means the thread held the requested
-                 cadence.  Much above 1.0 means it could not -- the same
-                 uncontrolled-cadence problem the sweep exists to measure.
+  vs req         near 1.0x means the thread held the requested cadence.
+                 Well above 1.0 means it could not -- the uncontrolled
+                 cadence the sweep exists to measure.
   rows pre/post  BOTH sides must be substantial.  A relocation with almost
                  no post-move data cannot show a transition.
-  lat_int>0      percent of rows with non-zero interval latency.  If this is
-                 0% the run carries no usable latency regardless of what the
-                 collection script reported.""")
+  lat_int>0      percent of rows with non-zero INTERVAL latency -- the
+                 useful one.  lat_mean>0 can be non-zero while this is 0,
+                 which means latency was captured but never twice within
+                 one bar, so no per-bar value could be formed.""")
 
 
 if __name__ == "__main__":

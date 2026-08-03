@@ -43,6 +43,21 @@ def analyze(dsdir, args):
         return None
 
     df, _ = ra.load_prepare(os.path.join(dsdir, "r1.csv.gz"))
+
+    if args.label_by == "touch":
+        # touch_windows is cumulative; its per-bar delta is the touch RATE --
+        # how many 10ms windows in this bar saw a write.  This is the
+        # PEBS-independent channel: no sampling, no attribution, read
+        # straight from soft-dirty PTE bits.
+        if "touch_windows" not in df.columns:
+            print(f"{os.path.basename(dsdir)}: no touch_windows column")
+            return None
+        df["touch_rate"] = (df.groupby("page_addr", sort=False)["touch_windows"]
+                              .diff().fillna(0.0).clip(lower=0.0))
+        rate_col = "touch_rate"
+    else:
+        rate_col = "interval_access_rate"
+
     step_ms = ra.measure_cadence(df)
     tol_ns = args.tol_bars * step_ms * 1e6
     mv = geo["move_ns"]
@@ -52,7 +67,7 @@ def analyze(dsdir, args):
     ts = df["timestamp_ns"].to_numpy()
 
     events = ra.detect_events(df, args.hot_frac, args.smooth,
-                              args.min_hot, args.debounce)
+                              args.min_hot, args.debounce, rate_col=rate_col)
 
     # page -> events of each type, as (time, type)
     per_page = {}
@@ -109,6 +124,8 @@ def analyze(dsdir, args):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("datasets", nargs="+")
+    ap.add_argument("--label-by", choices=["rate", "touch"], default="rate",
+                    help="which hotness channel defines the events")
     ap.add_argument("--tol-bars", type=float, default=5.0,
                     help="how close to move_ns counts as 'at the move'")
     ap.add_argument("--hot-frac", type=float, default=0.10)
@@ -117,6 +134,16 @@ def main():
     ap.add_argument("--debounce", type=int, default=2)
     args = ap.parse_args()
 
+    # The touch channel lives on a different scale from access rate (windows
+    # per bar, ~0-40, vs ~1e5), so its thresholds differ.  hot_frac must be
+    # high enough that a page falling to 17% of its former touch rate reads
+    # as a transition: at 0.10 the default would call 17% "still hot".
+    if args.label_by == "touch":
+        if args.min_hot == 1e4: args.min_hot = 1.0
+        if args.hot_frac == 0.10: args.hot_frac = 0.40
+
+    print(f"### channel = {args.label_by}  "
+          f"(hot_frac={args.hot_frac}, min_hot={args.min_hot})")
     rows = [r for d in args.datasets if (r := analyze(d, args))]
     if len(rows) > 1:
         print(f"\n{'='*74}\nSUMMARY")

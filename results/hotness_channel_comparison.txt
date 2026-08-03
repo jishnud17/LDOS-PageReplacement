@@ -1,0 +1,84 @@
+HOTNESS CHANNEL COMPARISON -- rate vs write-touch, scored against ground truth
+==============================================================================
+r650 (Xeon Platinum 8360Y, Ice Lake), GUPS hot-set relocation, 2026-08-03
+Datasets: data/real_workloads/touch10_gups_move_{c50,c100,c200,c400}
+
+THE QUESTION
+  Phase-1 rankings label hot/cold transitions from interval_access_rate --
+  the same quantity most of the ranked signals derive from.  Is there a
+  hotness channel that does NOT depend on access rate, and which channel
+  actually agrees with what the program did?
+
+GROUND TRUTH (no measurement involved)
+  Patched gups-hotset-move logs its relocation timestamp and geometry.  Its
+  own arithmetic (index1 += hotsize for index1 < hotsize/4) partitions each
+  thread's slice:
+      [0, 32K)      32 pages  hot -> cold   POSITIVES
+      [32K, 128K)   96 pages  stay hot      CONTROLS
+      [128K, 160K)  32 pages  cold -> hot
+  The 96 controls are what makes this decisive: same signal regime, same
+  tracking history, unaffected by the move.  A detector that fires on them
+  is producing false positives among pages it cannot distinguish from the
+  true events.
+
+RESULT
+                     RATE CHANNEL              WRITE-TOUCH CHANNEL
+  bar        recall   false   latency     recall   false   latency
+  151 ms         9%    100%     -32 ms      100%      0%    116 ms
+  304 ms        56%    100%    -562 ms      100%      0%    317 ms
+  600 ms        69%    100%    -361 ms      100%      0%    811 ms
+  1213 ms       88%    100%    1771 ms      100%      0%   1771 ms
+
+  recall  = of the 32 truly relocated pages, % flagged at the move
+  false   = of the 96 pages that stayed hot, % flagged anyway
+  latency = median delay from the program's relocation to detection
+
+READING IT
+  The rate channel flags EVERY control page at every cadence.  It cannot
+  separate pages the program stopped touching from pages it kept touching,
+  so its "detections" carry no information regardless of recall -- and the
+  negative latencies at 151-600 ms bars are the signature of a detector
+  firing on a measurement artifact rather than on the event.
+
+  The write-touch channel is exact at every cadence: all 32 positives, zero
+  false alarms on the 96 controls.  Its detection latency tracks bar width
+  (0.8-1.5 bars) because that is the sampling floor -- a per-bar channel
+  cannot resolve a transition faster than one bar.
+
+WHY THE RATE CHANNEL FAILS HERE
+  Not circularity alone.  Per-page PEBS crediting on this platform is
+  instruction-mix dependent: pages of identical true heat drew 0.2% vs
+  20.7% of samples depending on which branch the workload was executing
+  (see analyze_oor.sh, probe_regime.sh, and the commits of 2026-08-03).
+  Capture volume, workload throughput, and the manager's own accounting
+  were all verified identical across the two regimes, so the effect sits
+  below the kernel interface.  Rate labels are therefore not merely
+  self-referential -- they are wrong for cache-resident pages.
+
+THE CHANNEL
+  Soft-dirty PTE bits, 10 ms windows (LDOS_TOUCH_CHANNEL=1,
+  LDOS_TOUCH_WINDOW_CYCLES=1), exported as touch_windows.  Per bar the
+  delta is "how many 10 ms windows saw a write" -- no sampling, no event
+  selection, no DataLA attribution.
+
+COSTS AND LIMITS (all measured, none hidden)
+  - ~6.4x workload slowdown: clear_refs resets soft-dirty process-wide and
+    write-protects every resident PTE, so short windows are expensive.  The
+    labels therefore describe a workload the instrument itself slowed.
+  - Window length is not free: at 200 ms the channel SATURATES (relocated
+    and unmoved pages both read 1.00) because GUPS's 10% uniform traffic
+    keeps every page warm.  10 ms gives 0.17.  Sized by probe_touch_window.sh.
+  - WRITES only.  Fine for GUPS (read-modify-write); a read-hot page is
+    invisible to this channel.
+  - Ground truth exists only for the instrumented synthetic workload.
+    Anything claimed about XSBench/GAPBS/liblinear transfers by assumption.
+  - The latency channel (PERF_SAMPLE_WEIGHT) reads zero on this node and is
+    excluded.  It would have inherited the same crediting artifact anyway,
+    being derived from the same per-page attribution.
+
+REPRODUCE
+  bash run_cloudlab_experiments.sh          # preflight gates 1-10, then sweep
+  python3 agreement_check.py data/real_workloads/touch10_gups_move_c200 \
+      --label-by rate
+  python3 agreement_check.py data/real_workloads/touch10_gups_move_c200 \
+      --label-by touch

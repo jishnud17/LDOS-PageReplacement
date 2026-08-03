@@ -1,0 +1,111 @@
+[TM INFO] mmap shim library loaded
+3500000000 updates per thread (4 threads)
+field of 2^31 (2147483648) bytes
+8 byte element size (268435456 elements total)
+[TM INFO] Initializing tiered memory manager...
+[TM INFO] TELEMETRY-ONLY mode: uffd paging + migrations disabled, PEBS tracking active
+[TM INFO] Initialized tiers: DRAM=4GB, NVM=16GB
+[TM INFO] UFFD write-protect tracking: enabled
+[TM INFO] Userfaultfd initialized (fd=3)
+[TM INFO] Initializing PEBS subsystem...
+[TM INFO] Track admission threshold: 10 samples before a page enters the stats table
+[TM INFO] PEBS: opening events on 144 CPUs (loads + stores)
+[TM INFO] PEBS event 0x81d0: precise_ip requested 2, granted 2
+[TM INFO] PEBS event 0x82d0: precise_ip requested 1, granted 1
+[TM INFO] PEBS initialized successfully
+[TM INFO] Starting PEBS sampling...
+[TM INFO] PEBS sampling started
+[TM INFO] PEBS hardware sampling enabled
+[TM INFO] PEBS collector thread started
+[TM INFO] UFFD handler thread started
+[TM INFO] UFFD handler thread running
+[TM INFO] CSV output: ml_dataset_gups_move_w0p25.csv
+[TM INFO] Write-touch channel: soft-dirty, one window every 1 policy cycles
+[TM INFO] Policy thread started
+[TM INFO] Tiered memory manager initialized successfully
+[TM INFO] Policy thread running (interval=10ms)
+[TM INFO] Signal export cadence: 20 cycles (200 ms nominal)
+[TM INFO] Registered region: 0x7f5bc28a3000 + 2147483648 bytes (slot 0)
+[TM INFO] Managed mmap region: 0x7f5bc28a3000 + 2147483648
+Init took 0.8086 seconds
+Region address: 0x7f5bc28a3000 - 0x7f5c428a3000	 size: 2147483648
+Elements per thread: 67108864
+Initialization time: 0.8086 seconds.
+LDOS_GEOMETRY region_base=0x7f5bc28a3000 region_size=2147483648 slice_bytes=536870912 hot_bytes=131072 threads=4 elt_size=8
+Timing.
+[TM INFO] Cycle 100: pages=0 faults=0 migrations=0 pebs[samples=325999 r=243388 w=82611 throttle=156 err=0 lost=0]
+[TM INFO] Cycle 200: pages=0 faults=0 migrations=0 pebs[samples=543755 r=420818 w=122937 throttle=348 err=0 lost=0]
+[TM INFO] Cycle 300: pages=6 faults=0 migrations=0 pebs[samples=771594 r=605387 w=166207 throttle=538 err=0 lost=0]
+[TM INFO] Cycle 400: pages=27 faults=0 migrations=0 pebs[samples=1010401 r=798221 w=212180 throttle=745 err=0 lost=0]
+[TM INFO] Cycle 500: pages=60 faults=0 migrations=0 pebs[samples=1259252 r=999303 w=259949 throttle=992 err=0 lost=0]
+[TM INFO] Cycle 600: pages=95 faults=0 migrations=0 pebs[samples=1520927 r=1210253 w=310674 throttle=1252 err=0 lost=0]
+[TM INFO] Cycle 700: pages=116 faults=0 migrations=0 pebs[samples=1793790 r=1429968 w=363822 throttle=1500 err=0 lost=0]
+[TM INFO] Cycle 800: pages=127 faults=0 migrations=0 pebs[samples=2072370 r=1652896 w=419474 throttle=1791 err=0 lost=0]
+[TM INFO] Cycle 900: pages=128 faults=0 migrations=0 pebs[samples=2355210 r=1880844 w=474366 throttle=2120 err=0 lost=0]
+[TM INFO] Cycle 1000: pages=128 faults=0 migrations=0 pebs[samples=2644957 r=2111187 w=533770 throttle=2457 err=0 lost=0]
+[TM INFO] Cycle 1100: pages=128 faults=0 migrations=0 pebs[samples=2940283 r=2346818 w=593465 throttle=2796 err=0 lost=0]
+[TM INFO] Cycle 1200: pages=128 faults=0 migrations=0 pebs[samples=3234774 r=2582321 w=652453 throttle=3192 err=0 lost=0]
+[TM INFO] Cycle 1300: pages=128 faults=0 migrations=0 pebs[samples=3530694 r=2819931 w=710763 throttle=3580 err=0 lost=0]
+[TM INFO] Cycle 1400: pages=128 faults=0 migrations=0 pebs[samples=3830111 r=3060348 w=769763 throttle=3975 err=0 lost=0]
+[TM INFO] Cycle 1500: pages=128 faults=0 migrations=0 pebs[samples=4135647 r=3306169 w=829478 throttle=4381 err=0 lost=0]
+[TM INFO] Cycle 1600: pages=128 faults=0 migrations=0 pebs[samples=4448465 r=3556400 w=892065 throttle=4798 err=0 lost=0]
+[TM INFO] Cycle 1700: pages=128 faults=0 migrations=0 pebs[samples=4766872 r=3809228 w=957644 throttle=5223 err=0 lost=0]
+[TM INFO] Cycle 1800: pages=128 faults=0 migrations=0 pebs[samples=5086716 r=4063449 w=1023267 throttle=5658 err=0 lost=0]
+[TM INFO] Cycle 1900: pages=128 faults=0 migrations=0 pebs[samples=5413872 r=4322107 w=1091765 throttle=6102 err=0 lost=0]
+[TM INFO] Cycle 2000: pages=128 faults=0 migrations=0 pebs[samples=5738446 r=4581634 w=1156812 throttle=6550 err=0 lost=0]
+[TM INFO] Cycle 2100: pages=128 faults=0 migrations=0 pebs[samples=6064149 r=4842763 w=1221386 throttle=7016 err=0 lost=0]
+LDOS_GROUNDTRUTH move_ns=5344574515547 region_base=0x7f5bc28a3000 region_size=2147483648 slice_bytes=536870912 hot_bytes=131072 tic=60
+[TM INFO] Cycle 2200: pages=160 faults=0 migrations=0 pebs[samples=6375731 r=5098529 w=1277202 throttle=7476 err=0 lost=0]
+[TM INFO] Cycle 2300: pages=160 faults=0 migrations=0 pebs[samples=6680211 r=5349894 w=1330317 throttle=7954 err=0 lost=0]
+[TM INFO] Cycle 2400: pages=160 faults=0 migrations=0 pebs[samples=6989358 r=5602227 w=1387131 throttle=8444 err=0 lost=0]
+[TM INFO] Cycle 2500: pages=160 faults=0 migrations=0 pebs[samples=7298629 r=5856988 w=1441642 throttle=8934 err=0 lost=0]
+[TM INFO] Cycle 2600: pages=160 faults=0 migrations=0 pebs[samples=7612009 r=6113438 w=1498572 throttle=9429 err=0 lost=0]
+[TM INFO] Cycle 2700: pages=160 faults=0 migrations=0 pebs[samples=7924363 r=6371568 w=1552795 throttle=9932 err=0 lost=0]
+[TM INFO] Cycle 2800: pages=160 faults=0 migrations=0 pebs[samples=8238093 r=6631282 w=1606811 throttle=10443 err=0 lost=0]
+[TM INFO] Cycle 2900: pages=160 faults=0 migrations=0 pebs[samples=8555299 r=6893286 w=1662013 throttle=10962 err=0 lost=0]
+[TM INFO] Cycle 3000: pages=160 faults=0 migrations=0 pebs[samples=8873710 r=7155788 w=1717922 throttle=11486 err=0 lost=0]
+[TM INFO] Cycle 3100: pages=160 faults=0 migrations=0 pebs[samples=9191559 r=7418289 w=1773270 throttle=12022 err=0 lost=0]
+[TM INFO] Cycle 3200: pages=160 faults=0 migrations=0 pebs[samples=9508397 r=7682430 w=1825967 throttle=12552 err=0 lost=0]
+[TM INFO] Cycle 3300: pages=160 faults=0 migrations=0 pebs[samples=9827277 r=7948600 w=1878677 throttle=13108 err=0 lost=0]
+[TM INFO] Cycle 3400: pages=160 faults=0 migrations=0 pebs[samples=10148341 r=8216709 w=1931632 throttle=13651 err=0 lost=0]
+[TM INFO] Cycle 3500: pages=160 faults=0 migrations=0 pebs[samples=10476713 r=8487127 w=1989586 throttle=14209 err=0 lost=0]
+[TM INFO] Cycle 3600: pages=160 faults=0 migrations=0 pebs[samples=10800367 r=8757086 w=2043281 throttle=14774 err=0 lost=0]
+[TM INFO] Cycle 3700: pages=160 faults=0 migrations=0 pebs[samples=11130468 r=9029918 w=2100550 throttle=15337 err=0 lost=0]
+[TM INFO] Cycle 3800: pages=160 faults=0 migrations=0 pebs[samples=11461239 r=9305308 w=2155931 throttle=15913 err=0 lost=0]
+[TM INFO] Cycle 3900: pages=160 faults=0 migrations=0 pebs[samples=11796955 r=9582985 w=2213970 throttle=16490 err=0 lost=0]
+[TM INFO] Cycle 4000: pages=160 faults=0 migrations=0 pebs[samples=12132924 r=9861740 w=2271184 throttle=17084 err=0 lost=0]
+[TM INFO] Cycle 4100: pages=160 faults=0 migrations=0 pebs[samples=12473179 r=10143144 w=2330035 throttle=17682 err=0 lost=0]
+[TM INFO] Cycle 4200: pages=160 faults=0 migrations=0 pebs[samples=12811148 r=10424186 w=2386962 throttle=18285 err=0 lost=0]
+[TM INFO] Cycle 4300: pages=160 faults=0 migrations=0 pebs[samples=13155646 r=10707021 w=2448625 throttle=18890 err=0 lost=0]
+[TM INFO] Cycle 4400: pages=160 faults=0 migrations=0 pebs[samples=13505729 r=10993765 w=2511965 throttle=19514 err=0 lost=0]
+[TM INFO] Cycle 4500: pages=160 faults=0 migrations=0 pebs[samples=13860017 r=11282051 w=2577966 throttle=20140 err=0 lost=0]
+[TM INFO] Cycle 4600: pages=160 faults=0 migrations=0 pebs[samples=14210379 r=11570248 w=2640131 throttle=20772 err=0 lost=0]
+[TM INFO] Cycle 4700: pages=160 faults=0 migrations=0 pebs[samples=14565191 r=11860266 w=2704925 throttle=21411 err=0 lost=0]
+[TM INFO] Cycle 4800: pages=160 faults=0 migrations=0 pebs[samples=14918498 r=12152273 w=2766225 throttle=22058 err=0 lost=0]
+[TM INFO] Cycle 4900: pages=160 faults=0 migrations=0 pebs[samples=15278480 r=12445093 w=2833388 throttle=22698 err=0 lost=0]
+[TM INFO] Cycle 5000: pages=160 faults=0 migrations=0 pebs[samples=15639698 r=12739895 w=2899803 throttle=23344 err=0 lost=0]
+[TM INFO] Cycle 5100: pages=160 faults=0 migrations=0 pebs[samples=16008210 r=13037733 w=2970477 throttle=24008 err=0 lost=0]
+[TM INFO] Cycle 5200: pages=160 faults=0 migrations=0 pebs[samples=16377336 r=13338569 w=3038767 throttle=24675 err=0 lost=0]
+[TM INFO] Cycle 5300: pages=160 faults=0 migrations=0 pebs[samples=16748026 r=13641131 w=3106895 throttle=25340 err=0 lost=0]
+[TM INFO] Cycle 5400: pages=160 faults=0 migrations=0 pebs[samples=17121606 r=13946352 w=3175255 throttle=26012 err=0 lost=0]
+before_accesses: 100402793
+before_accesses: 103738940
+before_accesses: 101735324
+before_accesses: 102489556
+[TM INFO] Unregistered region: 0x7f5bc28a3000
+[TM INFO] Shutting down tiered memory manager...
+[TM INFO] Policy thread exiting
+[TM INFO] Policy thread stopped
+[TM INFO] UFFD handler thread exiting
+[TM INFO] UFFD handler thread stopped
+[TM INFO] PEBS totals: samples=17222831 reads=14030970 writes=3191861 throttles=26204 errors=0 lost=0
+[TM INFO] Shutting down PEBS...
+[TM INFO] Stopping PEBS sampling...
+[TM INFO] PEBS collector thread stopped
+[TM INFO] PEBS sampling stopped
+[TM INFO] PEBS shutdown complete
+[TM INFO] Final stats: faults=0, migrations=0, cycles=5433
+[TM INFO] Userfaultfd cleaned up
+[TM INFO] Page statistics cleaned up
+[TM INFO] Shutdown complete
+[TM INFO] mmap shim library unloaded

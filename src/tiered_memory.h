@@ -148,6 +148,11 @@ typedef struct page_stats {
     _Atomic uint64_t access_count;
     _Atomic uint64_t read_count;
     _Atomic uint64_t write_count;
+
+    /* uffd-WP touch channel (LDOS_UFFD_TOUCH=1): WP faults this page has
+     * taken -- at most one per re-arm interval.  Hotness evidence that
+     * shares nothing with PEBS.  0 when the channel is off. */
+    _Atomic uint64_t wp_fault_count;
     
     /* Temporal features */
     uint64_t first_access_ns;
@@ -171,10 +176,11 @@ typedef struct page_stats {
      * labeled from something independent of interval_access_rate, which is
      * what the rate-threshold event definition is built from.
      *
-     * ZERO unless the load-latency facility is selected
-     * (LDOS_PEBS_LOAD_EVENT=0x1cd); the default ALL_LOADS event does not
-     * populate the weight field.  Always check these are non-zero before
-     * trusting any latency-derived result. */
+     * MEASURED (Ice Lake r650): the DEFAULT ALL_LOADS event populates the
+     * weight on 33-99% of rows; 0x1cd starved store-heavy GUPS to zero.
+     * Always check these are non-zero before trusting any latency-derived
+     * result -- and remember they ride the same per-page sample crediting
+     * as the rate columns, so starved crediting starves these too. */
     double pebs_mean_latency_cycles;     /* lifetime mean over all samples */
     double pebs_interval_latency_cycles; /* mean over the last merge interval */
     uint64_t pebs_last_total_latency;    /* bookkeeping for the interval calc */
@@ -306,6 +312,7 @@ bool default_heuristic_policy(const page_stats_t *stats, migration_decision_t *d
 uint64_t get_time_ns(void);
 void* page_align(void *addr);
 void reprotect_all_tracked_pages(void);
+bool ldos_uffd_touch_enabled(void);
 
 /*============================================================================
  * LOGGING

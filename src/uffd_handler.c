@@ -23,6 +23,26 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+#include <stdlib.h>
+
+/* LDOS_UFFD_TOUCH=1: in telemetry mode, ALSO register regions with
+ * userfaultfd in write-protect mode and re-arm tracked pages on the normal
+ * WP_RESAMPLE_CYCLES cadence.  Each armed page then yields at most one WP
+ * fault per re-arm interval -- a binary "was written since the last re-arm"
+ * hotness channel that shares NOTHING with PEBS: no sampling, no DataLA
+ * attribution, no event selection.  Motivated by the r650 finding that PEBS
+ * load attribution is instruction-mix dependent (0.2% vs 20.7% sample share
+ * for identical page heat); this channel is immune by construction.
+ * Counted per page in wp_fault_count, exported as uffd_wp_faults. */
+bool ldos_uffd_touch_enabled(void) {
+  static int cached = -1;
+  if (cached < 0) {
+    const char *e = getenv("LDOS_UFFD_TOUCH");
+    cached = (e != NULL && e[0] == '1') ? 1 : 0;
+  }
+  return cached == 1;
+}
+
 static void *uffd_handler_thread(void *arg);
 
 /*============================================================================
@@ -115,6 +135,20 @@ int register_managed_region(void *addr, size_t length) {
       pthread_mutex_unlock(&g_manager.regions_lock);
       return -1;
     }
+  } else if (ldos_uffd_touch_enabled() && g_manager.uffd_wp_supported) {
+    /* Touch channel: WP-only registration -- no MISSING mode, so pages keep
+     * faulting in natively at full speed.  Registration alone protects
+     * nothing; reprotect_all_tracked_pages() arms tracked pages on its
+     * normal cadence, bounding faults to one per tracked page per re-arm. */
+    struct uffdio_register wp_reg = {
+        .range = {.start = (unsigned long)addr, .len = length},
+        .mode = UFFDIO_REGISTER_MODE_WP};
+    if (ioctl(g_manager.uffd, UFFDIO_REGISTER, &wp_reg) < 0)
+      TM_ERROR("UFFD touch: WP registration failed for %p+%zu: %s "
+               "(uffd_wp_faults will stay 0)",
+               addr, length, strerror(errno));
+    else
+      TM_INFO("UFFD touch channel: WP-registered %p + %zu", addr, length);
   }
 
   g_manager.regions[slot] = (managed_region_t){.base_addr = addr,
@@ -132,7 +166,7 @@ void unregister_managed_region(void *addr) {
   pthread_mutex_lock(&g_manager.regions_lock);
   for (int i = 0; i < MAX_MANAGED_REGIONS; i++) {
     if (g_manager.regions[i].active && g_manager.regions[i].base_addr == addr) {
-      if (!g_manager.telemetry_only) {
+      if (!g_manager.telemetry_only || ldos_uffd_touch_enabled()) {
         struct uffdio_range range = {.start = (unsigned long)addr,
                                      .len = g_manager.regions[i].length};
         ioctl(g_manager.uffd, UFFDIO_UNREGISTER, &range);
@@ -270,7 +304,13 @@ static void *uffd_handler_thread(void *arg) {
         if (g_manager.uffd_wp_supported &&
             (msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP)) {
           /* Repeat write to a tracked page: count it, then re-protect. */
-          record_page_access(fault_addr, true);
+          if (!ldos_uffd_touch_enabled())
+            record_page_access(fault_addr, true);
+          /* Touch channel keeps its count OUT of the PEBS-fed counters --
+           * the whole value of this label is independence from sampling. */
+          page_stats_t *tstats = get_page_stats(page_align(fault_addr));
+          if (tstats != NULL)
+            atomic_fetch_add(&tstats->wp_fault_count, 1);
 
           void *page = page_align(fault_addr);
           struct uffdio_writeprotect wp = {
@@ -317,7 +357,8 @@ void stop_uffd_handler(void) {
  */
 void reprotect_all_tracked_pages(void) {
   if (!g_manager.uffd_wp_supported) return;
-  if (g_manager.telemetry_only) return;  /* no WP registration to re-arm */
+  if (g_manager.telemetry_only && !ldos_uffd_touch_enabled())
+    return; /* no WP registration to re-arm */
 
   pthread_rwlock_rdlock(&g_manager.stats_lock);
   for (size_t i = 0; i < PAGE_STATS_HASH_SIZE; i++) {

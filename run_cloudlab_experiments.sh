@@ -94,6 +94,12 @@ export LDOS_MIN_SAMPLES_TO_TRACK="${LDOS_MIN_SAMPLES_TO_TRACK:-10}"
 # overloads the cadence: 8 (32KB lattice = 4 hot pages per slice,
 # deterministically, no coin flip).  preflight_gate.sh checks this.
 export LDOS_PAGE_SAMPLE_DIVISOR="${LDOS_PAGE_SAMPLE_DIVISOR:-1}"
+# uffd-WP touch channel: per-page "was written this 50ms window" faults,
+# exported as uffd_wp_faults.  Shares nothing with PEBS -- no sampling, no
+# DataLA attribution -- so it is immune to the instruction-mix crediting
+# artifact that makes the rate columns phase-dependent on this platform
+# (0.2% vs 20.7% sample share for identical page heat, diagnosed 2026-08-03).
+export LDOS_UFFD_TOUCH="${LDOS_UFFD_TOUCH:-1}"
 
 say() { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m   !! %s\033[0m\n' "$*"; }

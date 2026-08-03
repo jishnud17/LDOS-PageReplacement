@@ -59,8 +59,8 @@ static void export_page_stats_to_csv(uint64_t cycle) {
                         ",%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%d,%.6g"
                         ",%.6g,%.6g,%.6g,%.6g,%d,%.6g,%.6g,%.6g,%.6g,%.6g"
                         ",%.6g,%.6g"
-                        /* 2 latency columns (0 unless LDOS_PEBS_LOAD_EVENT=0x1cd) */
-                        ",%.6g,%.6g\n",
+                        /* 2 latency columns + uffd touch-channel faults */
+                        ",%.6g,%.6g,%" PRIu64 "\n",
                         cycle, now, entry->page_addr, entry->current_tier,
                         entry->heat_score, entry->access_count,
                         entry->read_count, entry->write_count, entry->migration_count,
@@ -74,7 +74,8 @@ static void export_page_stats_to_csv(uint64_t cycle) {
                         s->supertrend, s->sqn, s->trix, s->vhf, s->inter_access_interval_ms,
                         s->inter_access_variance_ms2, s->recency_weighted_freq,
                         entry->pebs_interval_latency_cycles,
-                        entry->pebs_mean_latency_cycles);
+                        entry->pebs_mean_latency_cycles,
+                        (uint64_t)atomic_load(&entry->wp_fault_count));
             }
             entry = entry->next;
         }
@@ -336,7 +337,7 @@ int start_policy_thread(void) {
               "ichimoku_tenkan,ichimoku_kijun,ichimoku_senkou_a,ichimoku_senkou_b,ichimoku_chikou,linear_reg_slope,linear_reg_intercept,parabolic_sar,parabolic_sar_direction,random_walk_index_high,"
               "random_walk_index_low,range_action_verification_index,schaff_trend_cycle,schaff_trend_cycle_signal,supertrend_direction,supertrend,system_quality_number,triple_exp_rate_of_change,vertical_horizontal_filter,inter_access_interval_ms,"
               "inter_access_variance_ms2,recency_weighted_frequency,"
-              "interval_latency_cycles,mean_latency_cycles\n");
+              "interval_latency_cycles,mean_latency_cycles,uffd_wp_faults\n");
       TM_INFO("CSV output: %s", csv_filename);
   }
 

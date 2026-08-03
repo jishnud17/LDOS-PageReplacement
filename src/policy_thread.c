@@ -304,12 +304,13 @@ static void *policy_thread_loop(void *arg) {
       pebs_stats_t ps = pebs_get_stats();
       TM_INFO("Cycle %" PRIu64 ": pages=%" PRIu64 " faults=%" PRIu64
               " migrations=%" PRIu64 " pebs[samples=%" PRIu64 " r=%" PRIu64
-              " w=%" PRIu64 " throttle=%" PRIu64 " err=%" PRIu64 "]",
+              " w=%" PRIu64 " throttle=%" PRIu64 " err=%" PRIu64
+              " lost=%" PRIu64 "]",
               cycles, (uint64_t)atomic_load(&g_manager.total_pages_tracked),
               (uint64_t)atomic_load(&g_manager.total_faults),
               (uint64_t)atomic_load(&g_manager.total_migrations),
               ps.total_samples, ps.read_samples, ps.write_samples,
-              ps.throttle_events, ps.errors);
+              ps.throttle_events, ps.errors, ps.lost_samples);
     }
   }
 

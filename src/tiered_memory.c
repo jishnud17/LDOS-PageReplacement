@@ -151,9 +151,10 @@ void tiered_manager_shutdown(void) {
    * tiered_manager_print_status) still report whether sampling worked. */
   pebs_stats_t pstats = pebs_get_stats();
   TM_INFO("PEBS totals: samples=%" PRIu64 " reads=%" PRIu64
-          " writes=%" PRIu64 " throttles=%" PRIu64 " errors=%" PRIu64,
+          " writes=%" PRIu64 " throttles=%" PRIu64 " errors=%" PRIu64
+          " lost=%" PRIu64,
           pstats.total_samples, pstats.read_samples, pstats.write_samples,
-          pstats.throttle_events, pstats.errors);
+          pstats.throttle_events, pstats.errors, pstats.lost_samples);
 
   /* Where did the samples actually land?  Compare the dumped vaddrs against
    * the "Registered region" base+length lines earlier in the log. */

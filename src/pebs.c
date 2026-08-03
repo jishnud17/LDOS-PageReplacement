@@ -82,6 +82,7 @@ static struct {
   _Atomic uint64_t write_samples;
   _Atomic uint64_t throttle_events;
   _Atomic uint64_t errors;
+  _Atomic uint64_t lost_samples; /* PERF_RECORD_LOST: kernel-reported drops */
 } pebs_state = {0};
 
 /*============================================================================
@@ -124,6 +125,18 @@ static inline int page_is_sampled(uint64_t aligned_addr) {
  * (LDOS_MIN_SAMPLES_TO_TRACK, default 1 = admit on first sample).
  * See the admission check in pebs_merge_with_page_stats(). */
 static uint64_t g_min_samples_to_track = 1;
+
+/* Raw per-sample dump (LDOS_PEBS_RAW_DUMP=<path>): every sample the collector
+ * drains, written BEFORE the addr==0 drop, the divisor filter, and record
+ * attribution.  This is the ground truth of what the kernel delivered.
+ * Written only by the collector thread, so unlocked buffered stdio is safe.
+ *
+ * Exists because every aggregated counter in this file sits downstream of a
+ * filter: total_samples counts only attributed samples, page records only
+ * in-filter pages, the CSV only in-region pages past admission.  The r650
+ * starved-regime investigation burned three collections because none of
+ * those views could say where the un-credited 99% of samples went. */
+static FILE *g_raw_fp = NULL;
 
 static pebs_page_record_t *get_or_create_record(uint64_t vaddr) {
   uint64_t aligned = page_align_addr(vaddr);
@@ -238,6 +251,11 @@ static void pebs_close_all_events(void) {
 }
 
 static void process_sample(struct perf_sample *ps, pebs_sample_type_t type) {
+  if (g_raw_fp != NULL) /* pre-filter: addr==0 rows are diagnostic too */
+    fprintf(g_raw_fp, "%" PRIu64 ",%d,0x%" PRIx64 ",%" PRIu64 "\n",
+            (uint64_t)ps->time, type == PEBS_SAMPLE_WRITE ? 1 : 0,
+            (uint64_t)ps->addr, (uint64_t)ps->weight);
+
   if (ps->addr == 0)
     return;
 
@@ -339,6 +357,21 @@ static void drain_buffer(pebs_sample_type_t type, int cpu) {
       atomic_fetch_add(&pebs_state.throttle_events, 1);
       break;
 
+    case PERF_RECORD_LOST: {
+      /* The kernel says how many samples IT dropped (ring full).  Ignoring
+       * this record type means silent loss is invisible; every dataset
+       * should be able to report its own loss. */
+      struct {
+        struct perf_event_header h;
+        uint64_t id, lost;
+      } lostrec;
+      size_t want = hdr.size < sizeof(lostrec) ? hdr.size : sizeof(lostrec);
+      ring_copy(&lostrec, pbuf, size, off, want);
+      if (want >= sizeof(lostrec))
+        atomic_fetch_add(&pebs_state.lost_samples, lostrec.lost);
+      break;
+    }
+
     default:
       /* Ignore unknown record types */
       break;
@@ -380,6 +413,19 @@ int pebs_init(void) {
   }
 
   TM_INFO("Initializing PEBS subsystem...");
+
+  /* Optional raw per-sample dump -- see g_raw_fp. */
+  const char *raw_env = getenv("LDOS_PEBS_RAW_DUMP");
+  if (raw_env != NULL && raw_env[0] != '\0') {
+    g_raw_fp = fopen(raw_env, "w");
+    if (g_raw_fp != NULL) {
+      setvbuf(g_raw_fp, NULL, _IOFBF, 1 << 20);
+      fprintf(g_raw_fp, "time_ns,is_write,vaddr,weight\n");
+      TM_INFO("Raw sample dump: %s (pre-filter, every drained sample)", raw_env);
+    } else {
+      TM_ERROR("Raw sample dump: cannot open %s", raw_env);
+    }
+  }
 
   /* Optional page sampling to bound tracked-page count on huge workloads. */
   const char *divisor_env = getenv("LDOS_PAGE_SAMPLE_DIVISOR");
@@ -584,6 +630,7 @@ pebs_stats_t pebs_get_stats(void) {
                         .throttle_events =
                             atomic_load(&pebs_state.throttle_events),
                         .errors = atomic_load(&pebs_state.errors),
+                        .lost_samples = atomic_load(&pebs_state.lost_samples),
                         .active = pebs_state.running};
   return stats;
 }
@@ -779,6 +826,12 @@ void pebs_clear_records(void) {
   atomic_store(&pebs_state.write_samples, 0);
   atomic_store(&pebs_state.throttle_events, 0);
   atomic_store(&pebs_state.errors, 0);
+  atomic_store(&pebs_state.lost_samples, 0);
+
+  if (g_raw_fp != NULL) {
+    fclose(g_raw_fp);
+    g_raw_fp = NULL;
+  }
 
   pthread_rwlock_unlock(&pebs_state.records_lock);
 }
@@ -793,6 +846,7 @@ void pebs_print_status(void) {
   TM_INFO("  Write samples: %lu", stats.write_samples);
   TM_INFO("  Throttle events: %lu", stats.throttle_events);
   TM_INFO("  Errors: %lu", stats.errors);
+  TM_INFO("  Lost samples (kernel-reported): %lu", stats.lost_samples);
 
   /* Count unique pages */
   size_t unique_pages = 0;

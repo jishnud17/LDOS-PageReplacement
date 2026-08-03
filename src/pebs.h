@@ -79,6 +79,7 @@ typedef struct pebs_stats {
   uint64_t write_samples;
   uint64_t throttle_events;
   uint64_t errors;
+  uint64_t lost_samples; /* PERF_RECORD_LOST: samples the KERNEL dropped */
   bool active;
 } pebs_stats_t;
 

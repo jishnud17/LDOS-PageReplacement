@@ -94,12 +94,26 @@ export LDOS_MIN_SAMPLES_TO_TRACK="${LDOS_MIN_SAMPLES_TO_TRACK:-10}"
 # overloads the cadence: 8 (32KB lattice = 4 hot pages per slice,
 # deterministically, no coin flip).  preflight_gate.sh checks this.
 export LDOS_PAGE_SAMPLE_DIVISOR="${LDOS_PAGE_SAMPLE_DIVISOR:-1}"
-# uffd-WP touch channel: per-page "was written this 50ms window" faults,
-# exported as uffd_wp_faults.  Shares nothing with PEBS -- no sampling, no
-# DataLA attribution -- so it is immune to the instruction-mix crediting
-# artifact that makes the rate columns phase-dependent on this platform
-# (0.2% vs 20.7% sample share for identical page heat, diagnosed 2026-08-03).
-export LDOS_UFFD_TOUCH="${LDOS_UFFD_TOUCH:-1}"
+# Soft-dirty write-touch channel, exported as touch_windows.  Shares nothing
+# with PEBS -- no sampling, no DataLA attribution -- so it escapes the
+# instruction-mix crediting artifact that makes the rate columns
+# phase-dependent here (0.2% vs 20.7% sample share for identical page heat).
+export LDOS_TOUCH_CHANNEL="${LDOS_TOUCH_CHANNEL:-1}"
+# 10ms windows.  MEASURED by probe_touch_window.sh: a binary "written this
+# window" bit separates hot from cold only if cold pages are idle for the
+# WHOLE window, and GUPS's 10% uniform traffic keeps every page warm.
+#   window   h2c/stays   GUPS rate
+#    200ms      1.00       0.197    <- saturated; labels nothing
+#     50ms      0.82       0.065
+#     20ms      0.33       0.039
+#     10ms      0.15       0.030    <- clean separation
+# The 6.4x slowdown vs 200ms is the method's price, not a bug: clear_refs
+# write-protects every resident PTE, so shorter windows cost more.  Both
+# channels observe the same slowed workload within a run, so rate-vs-touch
+# stays a fair comparison.  Runs now hit the workload stop flag
+# (move_at+100s) before exhausting their updates -- fine, the time series
+# is the deliverable, not the update total.
+export LDOS_TOUCH_WINDOW_CYCLES="${LDOS_TOUCH_WINDOW_CYCLES:-1}"
 
 say() { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m   !! %s\033[0m\n' "$*"; }

@@ -12,6 +12,7 @@
 #   6. data on both sides of the move
 #   7. latency captured       (>5% of rows non-zero)          [event bug]
 #   8. cadence held           (measured bar <=3x requested)    [overload bug]
+#  10. touch channel SEPARATES relocated from unmoved pages    [saturation]
 #   9. write-touch channel    (soft-dirty writes on hot pages) [PEBS-independent
 #                                                               label channel]
 #
@@ -30,6 +31,7 @@ export LDOS_MIN_SAMPLES_TO_TRACK="${LDOS_MIN_SAMPLES_TO_TRACK:-10}"
 export LDOS_PAGE_SAMPLE_DIVISOR="${LDOS_PAGE_SAMPLE_DIVISOR:-1}"
 export LDOS_SIGNAL_SAMPLE_MS="${LDOS_SIGNAL_SAMPLE_MS:-200}"
 export LDOS_TOUCH_CHANNEL="${LDOS_TOUCH_CHANNEL:-1}"
+export LDOS_TOUCH_WINDOW_CYCLES="${LDOS_TOUCH_WINDOW_CYCLES:-1}"
 export GUPS_MOVE_AT_SEC=15
 
 [[ -x "$GUPS" ]] || { echo "PREFLIGHT FAIL: missing $GUPS -- run the sweep's STEP 0 (patch+build) first"; exit 1; }
@@ -88,6 +90,7 @@ if not os.path.exists(csvp):
 
 tot = defaultdict(float); rows = pre = post = lat = 0
 last = {}; gaps = []; wp_pages = set()
+tlast = {}; tband = {"h2c": [], "stays": []}   # for the separation gate
 mv = int(mg.group(1)) if mg else None
 for r in csv.DictReader(open(csvp)):
     rows += 1
@@ -100,8 +103,15 @@ for r in csv.DictReader(open(csvp)):
     if mv is not None:
         pre += t < mv; post += t >= mv
     lat += float(r.get("interval_latency_cycles") or 0) > 0
-    if float(r.get("touch_windows") or 0) > 0:
+    tw = float(r.get("touch_windows") or 0)
+    if tw > 0:
         wp_pages.add(a)
+    if base is not None and mv is not None:
+        d = tw - tlast.get(a, tw); tlast[a] = tw
+        if t >= mv:
+            w = (a - base) % slice_b
+            if w < hot // 4:  tband["h2c"].append(d)
+            elif w < hot:     tband["stays"].append(d)
 
 check(rows >= 1000, f"row volume ({rows:,} rows, need >=1000)")
 if tot:
@@ -149,6 +159,18 @@ if os.environ.get("LDOS_TOUCH_CHANNEL", "1") != "0":
     check(len(wp_pages) >= 64,
           f"write-touch channel: {len(wp_pages)} pages showed soft-dirty "
           f"writes (need >=64; the 128 hot pages are written every window)")
+
+    # The gate that actually matters: does the channel SEPARATE?  A binary
+    # per-window bit saturates when cold pages still see background traffic,
+    # and a saturated channel passes every other check while labeling
+    # nothing.  Measured 1.00 at 200ms windows, 0.15 at 10ms.
+    h = sum(tband["h2c"]) / len(tband["h2c"]) if tband["h2c"] else 0.0
+    st = sum(tband["stays"]) / len(tband["stays"]) if tband["stays"] else 0.0
+    ratio = (h / st) if st else 1.0
+    check(ratio < 0.6,
+          f"touch channel separates: relocated/unmoved touch rate "
+          f"{ratio:.2f} (need <0.6; 1.00 = saturated -- shorten "
+          f"LDOS_TOUCH_WINDOW_CYCLES)")
 
 sys.exit(1 if fails else 0)
 PY

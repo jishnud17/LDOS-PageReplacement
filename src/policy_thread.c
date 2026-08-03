@@ -61,9 +61,16 @@ static const char *g_csv_label = "default";
  */
 #define WP_RESAMPLE_CYCLES 5
 
+/* Soft-dirty window length, in policy cycles (LDOS_TOUCH_WINDOW_CYCLES).
+ * clear_refs resets soft-dirty PROCESS-WIDE and write-protects the PTEs, so
+ * the next write to each resident page takes a minor fault.  Over a 2GB
+ * working set that is real overhead: at 5 cycles (50ms) the preflight
+ * workload ran ~3.2x longer.  20 cycles (200ms) cuts the clear rate 4x and
+ * still gives one touch observation per bar at the cadences we collect. */
 #define PAGEMAP_SOFT_DIRTY_BIT 55
 static int g_pagemap_fd = -1;
 static int g_clear_refs_fd = -1;
+static uint64_t g_touch_window_cycles = 20;
 
 static bool touch_channel_enabled(void) {
   static int cached = -1;
@@ -84,8 +91,13 @@ static void touch_channel_init(void) {
              "touch_windows will stay 0", strerror(errno));
     return;
   }
-  TM_INFO("Write-touch channel: soft-dirty, sampled every %d policy cycles",
-          WP_RESAMPLE_CYCLES);
+  const char *w = getenv("LDOS_TOUCH_WINDOW_CYCLES");
+  if (w != NULL) {
+    long v = atol(w);
+    if (v > 0) g_touch_window_cycles = (uint64_t)v;
+  }
+  TM_INFO("Write-touch channel: soft-dirty, one window every %" PRIu64
+          " policy cycles", g_touch_window_cycles);
 }
 
 /* Read soft-dirty for every tracked page, then clear for the next window. */
@@ -342,6 +354,8 @@ static void *policy_thread_loop(void *arg) {
      * it but never re-sets it, preventing the infinite-fault loop. */
     if (cycles % WP_RESAMPLE_CYCLES == 0) {
         reprotect_all_tracked_pages();
+    }
+    if (g_touch_window_cycles > 0 && cycles % g_touch_window_cycles == 0) {
         touch_channel_sample();
     }
 

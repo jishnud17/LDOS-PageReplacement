@@ -12,7 +12,7 @@
 #   6. data on both sides of the move
 #   7. latency captured       (>5% of rows non-zero)          [event bug]
 #   8. cadence held           (measured bar <=3x requested)    [overload bug]
-#   9. uffd touch channel     (hot pages taking WP faults)     [PEBS-independent
+#   9. write-touch channel    (soft-dirty writes on hot pages) [PEBS-independent
 #                                                               label channel]
 #
 # Called from run_cloudlab_experiments.sh (skip with PREFLIGHT=0); also runs
@@ -29,7 +29,7 @@ export LDOS_PEBS_TELEMETRY_ONLY="${LDOS_PEBS_TELEMETRY_ONLY:-1}"
 export LDOS_MIN_SAMPLES_TO_TRACK="${LDOS_MIN_SAMPLES_TO_TRACK:-10}"
 export LDOS_PAGE_SAMPLE_DIVISOR="${LDOS_PAGE_SAMPLE_DIVISOR:-1}"
 export LDOS_SIGNAL_SAMPLE_MS="${LDOS_SIGNAL_SAMPLE_MS:-200}"
-export LDOS_UFFD_TOUCH="${LDOS_UFFD_TOUCH:-1}"
+export LDOS_TOUCH_CHANNEL="${LDOS_TOUCH_CHANNEL:-1}"
 export GUPS_MOVE_AT_SEC=15
 
 [[ -x "$GUPS" ]] || { echo "PREFLIGHT FAIL: missing $GUPS -- run the sweep's STEP 0 (patch+build) first"; exit 1; }
@@ -51,6 +51,10 @@ fails = []
 def check(ok, msg):
     print(f"   {'ok  ' if ok else 'FAIL'} {msg}")
     if not ok: fails.append(msg)
+
+def warn(ok, msg):
+    """Report, but do not block the sweep."""
+    print(f"   {'ok  ' if ok else 'WARN'} {msg}")
 
 txt = open(f"{out}/preflight.stderr", errors="replace").read()
 mg = re.search(r"LDOS_GROUNDTRUTH move_ns=(\d+)", txt)
@@ -96,7 +100,7 @@ for r in csv.DictReader(open(csvp)):
     if mv is not None:
         pre += t < mv; post += t >= mv
     lat += float(r.get("interval_latency_cycles") or 0) > 0
-    if float(r.get("uffd_wp_faults") or 0) > 0:
+    if float(r.get("touch_windows") or 0) > 0:
         wp_pages.add(a)
 
 check(rows >= 1000, f"row volume ({rows:,} rows, need >=1000)")
@@ -114,8 +118,16 @@ if mv is not None:
     check(pre >= 100 and post >= 100,
           f"data on both sides of the move ({pre:,} pre / {post:,} post)")
 if rows:
-    check(lat / rows > 0.05,
-          f"latency captured on {lat/rows*100:.0f}% of rows (need >5)")
+    # WARNING, not a gate.  Latency is derived from PERF_SAMPLE_WEIGHT, which
+    # rides the same per-page sample crediting that was measured to be
+    # instruction-mix dependent on this platform -- so it inherits the very
+    # confound the touch channel exists to escape, and the study does not
+    # depend on it.  It also proved node-dependent: identical CPU model
+    # (Xeon Platinum 8360Y), identical code, 100% on one machine and 0% on
+    # another.  See the precise_ip line in the run log.
+    warn(lat / rows > 0.05,
+         f"latency captured on {lat/rows*100:.0f}% of rows "
+         f"(0 = no latency channel on this node; not required)")
 
 # The gate this collection needed and did not have: correct physics with a
 # broken clock.  ~300K tracked pages passed every other check while
@@ -129,14 +141,14 @@ if gaps:
           f"cadence held: {bar:.0f}ms measured vs {req:.0f}ms requested "
           f"({bar/req:.1f}x, need <=3x) at {len(tot):,} tracked pages")
 
-if os.environ.get("LDOS_UFFD_TOUCH") == "1":
+if os.environ.get("LDOS_TOUCH_CHANNEL", "1") != "0":
     # The PEBS-independent label channel.  GUPS writes every hot page many
     # times per 50ms re-arm window, so with the channel alive virtually all
     # hot pages must show faults.  0 here usually means the kernel lacks
     # UFFD-WP or the column is missing (stale build).
     check(len(wp_pages) >= 64,
-          f"uffd touch channel: {len(wp_pages)} pages took WP faults "
-          f"(need >=64; the 128 hot pages are written every window)")
+          f"write-touch channel: {len(wp_pages)} pages showed soft-dirty "
+          f"writes (need >=64; the 128 hot pages are written every window)")
 
 sys.exit(1 if fails else 0)
 PY

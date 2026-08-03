@@ -206,11 +206,28 @@ static int setup_perf_event(__u64 config, __u64 config1, int precise, int cpu,
   attr.precise_ip = precise; /* Load latency facility needs 2; stores use 1 */
 
   int fd = perf_event_open(&attr, 0, cpu, -1, 0);
+  const int precise_requested = attr.precise_ip;
   while (fd == -1 && attr.precise_ip > 1) {
-    /* Some kernels/CPUs reject precise_ip=2; degrade and retry. */
+    /* Some kernels/CPUs reject precise_ip=2; degrade and retry.
+     * This degradation is not cosmetic: PERF_SAMPLE_WEIGHT (the latency
+     * column) is only populated by the adaptive-PEBS memory group, which
+     * needs precise_ip=2.  A silent fallback to 1 is exactly what an
+     * all-zero latency column looks like -- so the granted value is logged
+     * below.  Observed: 100% latency on one Xeon 8360Y, 0% on another. */
     attr.precise_ip--;
     fd = perf_event_open(&attr, 0, cpu, -1, 0);
   }
+
+  /* Log what the kernel actually granted, once (cpu 0).  A silent 2->1
+   * degradation is indistinguishable from a working setup everywhere except
+   * the latency column, which quietly reads zero: PERF_SAMPLE_WEIGHT comes
+   * from the adaptive-PEBS memory group and needs precise_ip=2. */
+  if (cpu == 0)
+    TM_INFO("PEBS event 0x%llx: precise_ip requested %d, granted %d%s",
+            (unsigned long long)config, precise_requested,
+            fd == -1 ? -1 : attr.precise_ip,
+            (fd != -1 && attr.precise_ip < precise_requested)
+                ? "  <-- DEGRADED: latency column will be zero" : "");
   if (fd == -1) {
     TM_ERROR("perf_event_open failed: %s (config=0x%llx cpu=%d)",
              strerror(errno), (unsigned long long)config, cpu);

@@ -37,7 +37,14 @@
 bool ldos_uffd_touch_enabled(void) {
   static int cached = -1;
   if (cached < 0) {
-    const char *e = getenv("LDOS_UFFD_TOUCH");
+    /* OPT-IN, and off by default: WP-ONLY registration returns EINVAL on
+     * Linux 5.15 (measured, Ubuntu 22.04 / 5.15.0-177) -- the kernel wants
+     * MODE_MISSING alongside MODE_WP, which would hand the shim
+     * responsibility for resolving every first-touch fault and perturb the
+     * very timing telemetry mode exists to preserve.  The default write-
+     * touch channel is soft-dirty instead (policy_thread.c), which needs no
+     * registration and causes NO faults. */
+    const char *e = getenv("LDOS_UFFD_WP_REGISTER");
     cached = (e != NULL && e[0] == '1') ? 1 : 0;
   }
   return cached == 1;
@@ -310,7 +317,7 @@ static void *uffd_handler_thread(void *arg) {
            * the whole value of this label is independence from sampling. */
           page_stats_t *tstats = get_page_stats(page_align(fault_addr));
           if (tstats != NULL)
-            atomic_fetch_add(&tstats->wp_fault_count, 1);
+            atomic_fetch_add(&tstats->touch_windows, 1);
 
           void *page = page_align(fault_addr);
           struct uffdio_writeprotect wp = {

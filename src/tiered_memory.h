@@ -149,10 +149,12 @@ typedef struct page_stats {
     _Atomic uint64_t read_count;
     _Atomic uint64_t write_count;
 
-    /* uffd-WP touch channel (LDOS_UFFD_TOUCH=1): WP faults this page has
-     * taken -- at most one per re-arm interval.  Hotness evidence that
-     * shares nothing with PEBS.  0 when the channel is off. */
-    _Atomic uint64_t wp_fault_count;
+    /* Write-touch channel (LDOS_TOUCH_CHANNEL, default on): number of
+     * sampling windows in which this page was WRITTEN, from soft-dirty PTE
+     * bits.  Shares no mechanism with PEBS -- no sampling, no attribution --
+     * so it is immune to the instruction-mix crediting artifact that makes
+     * the rate and latency columns phase-dependent.  Writes only. */
+    _Atomic uint64_t touch_windows;
     
     /* Temporal features */
     uint64_t first_access_ns;

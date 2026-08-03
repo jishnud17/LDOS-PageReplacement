@@ -22,18 +22,98 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <fcntl.h>
+#include <stdint.h>
+
 migration_policy_fn g_migration_policy = NULL;
 static FILE *g_csv_file = NULL;
 static const char *g_csv_label = "default";
 
 /*
- * How often to re-arm UFFD write-protect on all tracked pages.
- * Each arm opens one sampling window: the first write per page per window
- * fires a WP fault and increments access_count.  Smaller values give finer
- * time resolution; larger values reduce ioctl overhead.
- * At POLICY_INTERVAL_MS=10 ms, 5 cycles = one re-arm every 50 ms.
+ * WRITE-TOUCH CHANNEL (LDOS_TOUCH_CHANNEL=1, on by default).
+ *
+ * A hotness signal that shares NOTHING with PEBS: no sampling, no event
+ * selection, no DataLA attribution.  Needed because PEBS per-page crediting
+ * was measured to be instruction-mix dependent on this platform -- pages of
+ * identical true heat drew 0.2% vs 20.7% of samples depending on two
+ * instructions in the workload's loop -- so rate- and latency-derived labels
+ * are both phase-sensitive.  This one cannot be: it reads the page table.
+ *
+ * Mechanism: /proc/self/clear_refs "4" resets every PTE's soft-dirty bit;
+ * any subsequent WRITE sets it.  Each window we read bit 55 of each tracked
+ * page's /proc/self/pagemap entry, count the ones that were written, then
+ * clear again.  Per page per window this is a binary "was written", which is
+ * exactly the hot/cold evidence the labels need.
+ *
+ * Chosen over uffd write-protect because WP-only UFFDIO_REGISTER is EINVAL
+ * on 5.15 and the MISSING+WP alternative would trap first-touch faults.
+ * Soft-dirty costs one pread per tracked page per window (~700 at 20 Hz) and
+ * imposes no faults on the workload at all.
+ *
+ * Limitation, stated plainly: WRITES only.  Fine for GUPS (every update is a
+ * read-modify-write); a read-only hot page is invisible to this channel.
+ */
+/*
+ * How often the write-sampling window turns over: re-arm UFFD write-protect
+ * (full-management mode) and read+clear soft-dirty (touch channel).
+ * Smaller values give finer time resolution; larger reduce overhead.
+ * At POLICY_INTERVAL_MS=10 ms, 5 cycles = one window every 50 ms.
  */
 #define WP_RESAMPLE_CYCLES 5
+
+#define PAGEMAP_SOFT_DIRTY_BIT 55
+static int g_pagemap_fd = -1;
+static int g_clear_refs_fd = -1;
+
+static bool touch_channel_enabled(void) {
+  static int cached = -1;
+  if (cached < 0) {
+    const char *e = getenv("LDOS_TOUCH_CHANNEL");
+    cached = (e == NULL || e[0] != '0') ? 1 : 0; /* default ON */
+  }
+  return cached == 1;
+}
+
+static void touch_channel_init(void) {
+  if (!touch_channel_enabled())
+    return;
+  g_pagemap_fd = open("/proc/self/pagemap", O_RDONLY);
+  g_clear_refs_fd = open("/proc/self/clear_refs", O_WRONLY);
+  if (g_pagemap_fd < 0 || g_clear_refs_fd < 0) {
+    TM_ERROR("Touch channel: cannot open pagemap/clear_refs (%s) -- "
+             "touch_windows will stay 0", strerror(errno));
+    return;
+  }
+  TM_INFO("Write-touch channel: soft-dirty, sampled every %d policy cycles",
+          WP_RESAMPLE_CYCLES);
+}
+
+/* Read soft-dirty for every tracked page, then clear for the next window. */
+static void touch_channel_sample(void) {
+  if (g_pagemap_fd < 0 || g_clear_refs_fd < 0)
+    return;
+
+  pthread_rwlock_rdlock(&g_manager.stats_lock);
+  for (size_t i = 0; i < PAGE_STATS_HASH_SIZE; i++) {
+    page_stats_t *entry = g_manager.page_stats_table[i];
+    while (entry != NULL) {
+      uint64_t pme = 0;
+      off_t off = (off_t)(((uintptr_t)entry->page_addr / PAGE_SIZE)
+                          * sizeof(uint64_t));
+      ssize_t got = pread(g_pagemap_fd, &pme, sizeof(pme), off);
+      if (got == (ssize_t)sizeof(pme) &&
+          (pme & (1ULL << PAGEMAP_SOFT_DIRTY_BIT)))
+        atomic_fetch_add(&entry->touch_windows, 1);
+      entry = entry->next;
+    }
+  }
+  pthread_rwlock_unlock(&g_manager.stats_lock);
+
+  /* "4" = clear soft-dirty across the address space, opening the next
+   * window.  Process-wide by design: we read every tracked page above. */
+  ssize_t w = write(g_clear_refs_fd, "4\n", 2);
+  (void)w;
+}
 
 void set_csv_label(const char *label) {
     if (label) g_csv_label = label;
@@ -59,7 +139,7 @@ static void export_page_stats_to_csv(uint64_t cycle) {
                         ",%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%d,%.6g"
                         ",%.6g,%.6g,%.6g,%.6g,%d,%.6g,%.6g,%.6g,%.6g,%.6g"
                         ",%.6g,%.6g"
-                        /* 2 latency columns + uffd touch-channel faults */
+                        /* 2 latency columns + soft-dirty write-touch windows */
                         ",%.6g,%.6g,%" PRIu64 "\n",
                         cycle, now, entry->page_addr, entry->current_tier,
                         entry->heat_score, entry->access_count,
@@ -75,7 +155,7 @@ static void export_page_stats_to_csv(uint64_t cycle) {
                         s->inter_access_variance_ms2, s->recency_weighted_freq,
                         entry->pebs_interval_latency_cycles,
                         entry->pebs_mean_latency_cycles,
-                        (uint64_t)atomic_load(&entry->wp_fault_count));
+                        (uint64_t)atomic_load(&entry->touch_windows));
             }
             entry = entry->next;
         }
@@ -262,6 +342,7 @@ static void *policy_thread_loop(void *arg) {
      * it but never re-sets it, preventing the infinite-fault loop. */
     if (cycles % WP_RESAMPLE_CYCLES == 0) {
         reprotect_all_tracked_pages();
+        touch_channel_sample();
     }
 
     /* Telemetry-only mode: no migrations -- pages are not under uffd
@@ -337,9 +418,11 @@ int start_policy_thread(void) {
               "ichimoku_tenkan,ichimoku_kijun,ichimoku_senkou_a,ichimoku_senkou_b,ichimoku_chikou,linear_reg_slope,linear_reg_intercept,parabolic_sar,parabolic_sar_direction,random_walk_index_high,"
               "random_walk_index_low,range_action_verification_index,schaff_trend_cycle,schaff_trend_cycle_signal,supertrend_direction,supertrend,system_quality_number,triple_exp_rate_of_change,vertical_horizontal_filter,inter_access_interval_ms,"
               "inter_access_variance_ms2,recency_weighted_frequency,"
-              "interval_latency_cycles,mean_latency_cycles,uffd_wp_faults\n");
+              "interval_latency_cycles,mean_latency_cycles,touch_windows\n");
       TM_INFO("CSV output: %s", csv_filename);
   }
+
+  touch_channel_init();
 
   if (pthread_create(&g_manager.policy_thread, NULL, policy_thread_loop,
                      NULL) != 0) {

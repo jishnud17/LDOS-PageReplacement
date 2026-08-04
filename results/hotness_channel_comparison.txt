@@ -82,3 +82,49 @@ REPRODUCE
       --label-by rate
   python3 agreement_check.py data/real_workloads/touch10_gups_move_c200 \
       --label-by touch
+
+
+==============================================================================
+FOLLOW-UP: what changes when the labels are corrected
+==============================================================================
+
+Re-ranked the same four datasets under both channels (reactivity_analysis.py
+--label-by rate|touch).  Only the labeling changes; signals and detector are
+identical.
+
+  cadence   rho(rate-labeled, touch-labeled)
+   151ms          0.822
+   304ms          0.889
+   600ms          0.900
+  1213ms          0.900
+
+  Replicate runs of the SAME labeling agreed at rho 0.96-0.98 (r1 vs r2 on
+  the original datasets), so 0.82-0.90 is the labeling channel talking, not
+  run-to-run noise -- but it is a re-ordering, not a different answer.
+
+  Top of the table is stable.  schaff_trend_cycle and its signal line are
+  top-5 at every cadence under touch labels; random_walk_index_low/high
+  lead at the three coarser bars.  The movement is mid-table:
+  swing_index #3->#10, parabolic_sar_direction #6->#13,
+  range_action_verification_index #13->#6, aroon_up #18->#11 (at 600ms).
+
+  So the phase-1 headline signals largely survive correction.  The
+  mid-table ordering does not, and should not be quoted from the
+  rate-labeled runs.
+
+THE ARTIFACT IS REPRODUCIBLE, AND IT IS WHY RATE LABELS FAIL
+  Same measurement on the new datasets, per ground-truth band, across the
+  relocation:
+
+    hot_to_cold pages   interval_access_rate   4,344 ->      25   x0.01
+    stays_hot   pages   interval_access_rate   4,704 -> 667,581   x141.92
+
+  The 96 pages the program provably did NOT touch differently read 142x
+  HOTTER after the move.  That is the mechanism behind the 100% false-alarm
+  rate: the detector sees a 142x jump on every control page and calls it a
+  transition.  Reproduced on two separate nodes and four cadences.
+
+  Consequence for interval_access_rate as a SIGNAL (it is rankable under
+  touch labels, since it is no longer the label): it ranks #24 of 34.  Raw
+  PEBS access rate is a poor detector of the transition it is conventionally
+  used to define -- on this platform.

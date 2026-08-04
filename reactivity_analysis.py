@@ -97,6 +97,13 @@ def load_prepare(path):
     df = pd.read_csv(path)
     df = df.rename(columns=COLUMN_RENAMES)   # normalize phase-1 abbreviated names
     df = df.sort_values(["page_addr", "cycle"]).reset_index(drop=True)
+    if "touch_windows" in df.columns:
+        # Cumulative counter -> per-bar rate: how many soft-dirty windows in
+        # this bar saw a write.  Derived here so --label-by touch has a
+        # column to threshold on, and so it is excluded as circular when it
+        # IS the label (see label_column_and_exclusions).
+        df["touch_rate"] = (df.groupby("page_addr", sort=False)["touch_windows"]
+                              .diff().fillna(0.0).clip(lower=0.0))
     signal_cols = [c for c in df.columns
                    if c not in META_COLS and pd.api.types.is_numeric_dtype(df[c])]
     # Drop constant columns (no variation -> nothing to react).
@@ -121,6 +128,14 @@ def label_column_and_exclusions(label_by):
     if label_by == "latency":
         return "interval_latency_cycles", {
             "interval_latency_cycles", "mean_latency_cycles"}
+    if label_by == "touch":
+        # Soft-dirty write-touch labels.  Only the touch columns are
+        # circular here -- and critically, interval_access_rate is NOT, so
+        # for the first time the rate signal can be RANKED rather than
+        # assumed.  That matters: measured against ground truth, rate labels
+        # flagged 100% of the pages that provably never moved, while touch
+        # labels flagged 0% (results/hotness_channel_comparison.txt).
+        return "touch_rate", {"touch_rate", "touch_windows"}
     return "interval_access_rate", {
         "interval_access_rate", "ichimoku_chikou"}
 
@@ -354,11 +369,15 @@ def main():
     ap.add_argument("csvs", nargs="+", help="ml_dataset_*.csv files")
     ap.add_argument("--window", type=int, default=5,
                     help="half-window in 50ms steps around each event (default 5 = +-250ms)")
-    ap.add_argument("--label-by", choices=["rate", "latency"], default="rate",
+    ap.add_argument("--label-by", choices=["rate", "latency", "touch"],
+                    default="rate",
                     help="quantity whose threshold crossing DEFINES an event. "
-                         "'latency' needs CSVs collected with "
-                         "LDOS_PEBS_LOAD_EVENT=0x1cd; the labeling column and "
-                         "its siblings are auto-excluded from the ranking.")
+                         "'touch' uses soft-dirty write windows and is the "
+                         "only channel validated against ground truth "
+                         "(100%% recall / 0%% false alarms vs 100%% false "
+                         "alarms for rate -- see "
+                         "results/hotness_channel_comparison.txt). The "
+                         "labeling column and its siblings are auto-excluded.")
     ap.add_argument("--hot-frac", type=float, default=0.10,
                     help="active threshold as fraction of a page's peak rate (default 0.10)")
     ap.add_argument("--min-hot", type=float, default=1e4,
@@ -370,6 +389,14 @@ def main():
     ap.add_argument("--top", type=int, default=12,
                     help="how many signals to print per event type (default 12)")
     args = ap.parse_args()
+
+    # Per-channel thresholds.  touch_rate lives on a windows-per-bar scale
+    # (~0-40), not an accesses-per-second one (~1e5), so the rate defaults
+    # would never fire: at hot_frac=0.10 a page falling to 17% of its former
+    # touch rate still reads as "active".
+    if args.label_by == "touch":
+        if args.min_hot == 1e4:  args.min_hot = 1.0
+        if args.hot_frac == 0.10: args.hot_frac = 0.40
 
     accum = []
     for path in args.csvs:

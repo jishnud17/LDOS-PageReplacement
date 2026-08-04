@@ -128,3 +128,66 @@ THE ARTIFACT IS REPRODUCIBLE, AND IT IS WHY RATE LABELS FAIL
   touch labels, since it is no longer the label): it ranks #24 of 34.  Raw
   PEBS access rate is a poor detector of the transition it is conventionally
   used to define -- on this platform.
+
+
+==============================================================================
+SECOND METHODOLOGICAL FINDING: the normalisation convention outranks the
+labelling channel
+==============================================================================
+
+The claim above that interval_access_rate ranks #24 of 34 turned out to be
+an artifact of the SCORER, not a property of the signal.  Checking it
+surfaced a larger problem than the one we set out to fix.
+
+score() measures event amplitude on values z-scored by each signal's
+GLOBAL mean/std -- one pair of constants across all pages and all bars.
+Measured on touch10_gups_move_c200, for the 32 relocated pages:
+
+  signal                      global std   median jump   in std units
+  interval_access_rate         334,421.5       5,715.9          0.017
+  random_walk_index_low              0.6           0.6          1.099
+  schaff_trend_cycle                37.5          48.0          1.280
+
+interval_access_rate responds cleanly at the relocation.  Its global std is
+inflated ~60x by the PEBS crediting artifact (control pages reading 142x
+hotter), so a real response registers as 0.017 std units.  Bounded
+oscillators have per-page jumps comparable to their global spread and score
+~1.1-1.3.  The ranking was therefore partly measuring BOUNDEDNESS.
+
+Re-scoring with per-page normalisation (each page in units of its own
+variability -- the standard convention for event-triggered averaging;
+--znorm page):
+
+  cadence   rho(global-norm, page-norm)   interval_access_rate rank
+   151ms          0.297                      #28 -> #17
+   304ms          0.510                      #22 ->  #5
+   600ms          0.438                      #24 ->  #7
+  1213ms          0.480                      #22 ->  #3
+
+  For scale: fixing the LABELS moved the ranking by rho 0.82-0.90.  Fixing
+  the NORMALISATION moves it by rho 0.30-0.51.  The scoring convention
+  matters roughly twice as much as the labelling channel, and neither had
+  been validated.
+
+  Under per-page normalisation interval_access_rate is not only responsive
+  but among the earliest (lead -1798 ms at 600 ms bars).  Its apparent
+  weakness was entirely the normalisation.
+
+WHAT IS AND IS NOT SETTLED
+  Settled: write-touch labels agree with ground truth and rate labels do
+  not (100% vs 0% false alarms).  That result is independent of
+  normalisation -- it comes from agreement_check.py, which counts detected
+  events against known page identities and never z-scores anything.
+
+  NOT settled: the signal ranking itself.  Under per-page normalisation no
+  signal holds the top 5 at all four cadences (schaff_trend_cycle at three,
+  random_walk_index_low at three), where under global normalisation
+  schaff_trend_cycle held all four.  Either the cadences genuinely favour
+  different signals -- which is what the cadence sweep exists to test -- or
+  per-page normalisation is noisier because pages with small variance get
+  amplified.  Both are plausible and they are distinguishable: replicate
+  runs (REPLICATE_TAG=_r2) would separate a real cadence effect from
+  scoring noise, and that has not been collected for these datasets.
+
+  Until that is done, no ranking from these datasets should be quoted as
+  final -- under either convention.

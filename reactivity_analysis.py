@@ -186,7 +186,43 @@ def detect_events(df, hot_frac, smooth_win, min_hot, debounce, rate_col=None):
     return events
 
 
-def event_triggered(df, events, signal_cols, W, zmean, zstd):
+def zscore_arrays(df, signal_cols, znorm):
+    """
+    Per-signal z-scored arrays.
+
+    znorm='global' (historical): one mean/std per signal over ALL pages and
+    bars.  This systematically penalises signals with large CROSS-PAGE
+    spread relative to their per-page response.  Measured on
+    touch10_gups_move_c200: interval_access_rate drops cleanly at the
+    relocation (median per-page jump 5,716) but the global std is 334,421 --
+    inflated by the PEBS crediting artifact making control pages read 142x
+    hotter -- so the response registers as 0.017 std units and the signal
+    ranks #24 of 34.  Bounded oscillators (RWI, Schaff, Aroon) have
+    per-page jumps comparable to their global spread and score ~1.1-1.3.
+    The ranking therefore partly measures BOUNDEDNESS, not reactivity.
+
+    znorm='page': each page normalised by its OWN mean/std, so amplitude is
+    measured in units of that page's variability.  This is the standard
+    convention for event-triggered averaging and removes the bias.
+    """
+    out = {}
+    for c in signal_cols:
+        v = df[c].to_numpy(dtype=float)
+        if znorm == "page":
+            g = df.groupby("page_addr", sort=False)[c]
+            m = g.transform("mean").to_numpy(dtype=float)
+            sd = g.transform("std").to_numpy(dtype=float)
+            # a page with no variance in this signal contributes nothing;
+            # guard the divide rather than emit inf.
+            sd = np.where(~np.isfinite(sd) | (sd < 1e-12), np.nan, sd)
+            out[c] = (v - m) / sd
+        else:
+            sd = df[c].std() or 1.0
+            out[c] = (v - df[c].mean()) / sd
+    return out
+
+
+def event_triggered(df, events, signal_cols, W, zmean, zstd, zarr=None):
     """
     Build event-triggered z-scored trajectories.
     Returns: {event_type: {signal: (mean_traj[2W+1], per_event_matrix)}}
@@ -205,7 +241,8 @@ def event_triggered(df, events, signal_cols, W, zmean, zstd):
             continue
         sig = {}
         for c in signal_cols:
-            z = (df[c].to_numpy(dtype=float) - zmean[c]) / zstd[c]
+            z = (zarr[c] if zarr is not None
+                 else (df[c].to_numpy(dtype=float) - zmean[c]) / zstd[c])
             mat = np.empty((len(ev_idx), 2 * W + 1))
             for r, ri in enumerate(ev_idx):
                 mat[r] = z[ri - W: ri + W + 1]
@@ -291,7 +328,9 @@ def analyze_file(path, args, accum):
         print("  no events -- try lowering --hot-frac or --min-hot")
         return
 
-    by_type = event_triggered(df, events, signal_cols, args.window, zmean, zstd)
+    zarr = zscore_arrays(df, signal_cols, args.znorm)
+    by_type = event_triggered(df, events, signal_cols, args.window, zmean, zstd,
+                              zarr=zarr)
 
     if not by_type:
         # Events were found, but every one sat too close to the start or end
@@ -378,6 +417,11 @@ def main():
                          "alarms for rate -- see "
                          "results/hotness_channel_comparison.txt). The "
                          "labeling column and its siblings are auto-excluded.")
+    ap.add_argument("--znorm", choices=["global", "page"], default="global",
+                    help="normalise each signal by its global spread "
+                         "(historical) or by each page's own spread. "
+                         "'global' penalises unbounded signals: see "
+                         "zscore_arrays().")
     ap.add_argument("--hot-frac", type=float, default=0.10,
                     help="active threshold as fraction of a page's peak rate (default 0.10)")
     ap.add_argument("--min-hot", type=float, default=1e4,
